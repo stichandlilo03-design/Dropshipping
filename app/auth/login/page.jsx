@@ -1,12 +1,10 @@
-
 'use client';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Mail, Lock, Eye, EyeOff, AlertCircle } from 'lucide-react';
-import { db } from '@/lib/database';
-import { hashPassword, saveUser, generateToken } from '@/lib/auth';
+import { loginUser } from '@/lib/firebase';
 
 export default function Login() {
   const router = useRouter();
@@ -24,32 +22,34 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const user = db.getUserByEmail(formData.email);
-      
-      if (!user) {
-        setError('Email not found');
+      // Login with Firebase
+      const result = await loginUser(formData.email, formData.password);
+
+      if (!result.success) {
+        setError(result.error || 'Login failed');
         setLoading(false);
         return;
       }
 
-      const hashedPassword = hashPassword(formData.password);
-      if (user.password !== hashedPassword) {
-        setError('Incorrect password');
-        setLoading(false);
-        return;
-      }
+      // Get user data from Firestore
+      const { auth, getFirestore, doc, getDoc } = await import('firebase/firestore');
+      const db = getFirestore();
+      const userDoc = await getDoc(doc(db, 'users', result.user.uid));
 
-      const token = generateToken(user.id, user.email);
-      saveUser({
-        id: user.id,
-        email: user.email,
-        storeName: user.storeName,
-        token,
-      });
+      // Store user info in localStorage
+      localStorage.setItem('user', JSON.stringify({
+        id: result.user.uid,
+        email: result.user.email,
+        storeName: userDoc.data()?.storeName || 'My Store',
+      }));
 
+      localStorage.setItem('token', 'firebase_' + result.user.uid);
+
+      // Redirect to dashboard
       router.push('/');
     } catch (err) {
       setError('Login failed. Please try again.');
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -158,12 +158,9 @@ export default function Login() {
 
         {/* Demo Credentials */}
         <div className="mt-6 bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
-          <p className="text-sm text-blue-400 font-semibold mb-2">Demo Account</p>
+          <p className="text-sm text-blue-400 font-semibold mb-2">💡 Tip</p>
           <p className="text-xs text-gray-400">
-            Email: <span className="text-gray-300">demo@example.com</span>
-          </p>
-          <p className="text-xs text-gray-400">
-            Password: <span className="text-gray-300">demo123</span>
+            After signing up, you can login from any device!
           </p>
         </div>
 
@@ -175,4 +172,3 @@ export default function Login() {
     </div>
   );
 }
-
