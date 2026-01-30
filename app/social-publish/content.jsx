@@ -3,14 +3,14 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Send, Calendar, Hash, AlertCircle, Check, Loader, Share2 } from 'lucide-react';
+import { ArrowLeft, Send, Calendar, Hash, AlertCircle, Check, Loader } from 'lucide-react';
 import { getUser, getToken } from '@/lib/auth';
 
 const PLATFORMS = [
-  { id: 'tiktok', name: 'TikTok', icon: '🎵', color: 'from-black to-gray-800' },
-  { id: 'instagram', name: 'Instagram', icon: '📷', color: 'from-pink-600 to-purple-600' },
-  { id: 'facebook', name: 'Facebook', icon: '👍', color: 'from-blue-600 to-blue-700' },
-  { id: 'pinterest', name: 'Pinterest', icon: '📌', color: 'from-red-600 to-red-700' },
+  { id: 'tiktok', name: 'TikTok', icon: '🎵' },
+  { id: 'instagram', name: 'Instagram', icon: '📷' },
+  { id: 'facebook', name: 'Facebook', icon: '👍' },
+  { id: 'pinterest', name: 'Pinterest', icon: '📌' },
 ];
 
 const CAPTIONS = {
