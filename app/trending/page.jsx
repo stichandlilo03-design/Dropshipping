@@ -36,7 +36,6 @@ export default function Trending() {
     try {
       setLoading(true);
       
-      // Try to fetch from Printful API
       try {
         const response = await fetch('/api/printful/trending', {
           headers: {
@@ -55,7 +54,6 @@ export default function Trending() {
         console.log('Printful API not connected yet');
       }
 
-      // Try to fetch from TikTok API
       try {
         const response = await fetch('/api/tiktok/trending', {
           headers: {
@@ -74,7 +72,6 @@ export default function Trending() {
         console.log('TikTok API not connected yet');
       }
 
-      // Try to fetch from Google Trends API
       try {
         const response = await fetch('/api/trends/trending');
 
@@ -89,7 +86,6 @@ export default function Trending() {
         console.log('Google Trends API not connected yet');
       }
 
-      // No APIs connected yet - show empty state
       setTrendingProducts([]);
       setFilteredProducts([]);
       setLoading(false);
@@ -121,8 +117,9 @@ export default function Trending() {
       products.push(newProduct);
       localStorage.setItem('products', JSON.stringify(products));
 
-      // Also update database
-      db.addProduct(newProduct, user.id);
+      if (user && db) {
+        db.addProduct(newProduct, user.id);
+      }
 
       setNotification(`✅ "${product.name}" added to your store!`);
       setTimeout(() => setNotification(''), 3000);
@@ -239,7 +236,7 @@ export default function Trending() {
           </div>
         )}
 
-        {/* Filters & Sort (Show when data exists) */}
+        {/* Filters & Sort */}
         {!loading && trendingProducts.length > 0 && (
           <div className="card">
             <div className="flex flex-col md:flex-row gap-4">
