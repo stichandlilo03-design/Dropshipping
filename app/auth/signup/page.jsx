@@ -3,81 +3,100 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Mail, Lock, Eye, EyeOff, AlertCircle, Loader } from 'lucide-react';
-import { loginUser } from '@/lib/firebase';
+import { Mail, Lock, Store, Eye, EyeOff, AlertCircle, Check, Loader } from 'lucide-react';
+import { registerUser } from '@/lib/firebase';
 import { generateToken, saveUser } from '@/lib/auth';
-import { getFirestore, doc, getDoc } from 'firebase/firestore';
 
-export default function Login() {
+export default function Signup() {
   const router = useRouter();
   const [formData, setFormData] = useState({
+    storeName: '',
     email: '',
     password: '',
+    confirmPassword: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [success, setSuccess] = useState(false);
+
+  const validateForm = () => {
+    if (!formData.storeName.trim()) {
+      setError('Store name is required');
+      return false;
+    }
+    if (!formData.email.includes('@')) {
+      setError('Invalid email address');
+      return false;
+    }
+    if (formData.password.length < 6) {
+      setError('Password must be at least 6 characters');
+      return false;
+    }
+    if (formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match');
+      return false;
+    }
+    return true;
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setLoading(true);
+    setSuccess(false);
 
     try {
-      // Validate
-      if (!formData.email || !formData.password) {
-        setError('Email and password required');
+      if (!validateForm()) {
         setLoading(false);
         return;
       }
 
-      // Login with Firebase
-      const result = await loginUser(formData.email, formData.password);
+      // Show success message
+      setSuccess(true);
+
+      // Register with Firebase
+      const result = await registerUser(
+        formData.email,
+        formData.password,
+        formData.storeName
+      );
 
       if (!result.success) {
-        setError(result.error || 'Login failed');
+        setError(result.error || 'Registration failed');
+        setSuccess(false);
         setLoading(false);
         return;
       }
 
-      // Get user data from Firestore
-      try {
-        const { db } = await import('@/lib/firebase');
-        const userDoc = await getDoc(doc(db, 'users', result.user.uid));
-        
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          
-          // Generate token
-          const token = generateToken(result.user.uid, result.user.email);
+      // Get user details
+      const userId = result.user.uid;
+      const email = result.user.email;
+      const storeName = formData.storeName;
 
-          // Save to localStorage
-          saveUser({
-            id: result.user.uid,
-            email: result.user.email,
-            storeName: userData.storeName || 'My Store',
-            token: token,
-          });
-        }
-      } catch (firestoreError) {
-        console.log('Could not fetch user data, but login successful');
-        
-        // Still save user even if Firestore fetch fails
-        const token = generateToken(result.user.uid, result.user.email);
-        saveUser({
-          id: result.user.uid,
-          email: result.user.email,
-          storeName: 'My Store',
-          token: token,
-        });
-      }
+      // Generate token
+      const token = generateToken(userId, email);
+
+      // Save to localStorage for immediate access
+      saveUser({
+        id: userId,
+        email: email,
+        storeName: storeName,
+        token: token,
+      });
+
+      // Wait a moment to show success message
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
       // Redirect to dashboard
       router.push('/');
       
     } catch (err) {
-      setError('Login failed. Please try again.');
+      setError('Signup failed. Please try again.');
+      setSuccess(false);
       console.error(err);
+    } finally {
       setLoading(false);
     }
   };
@@ -92,12 +111,12 @@ export default function Login() {
         {/* Logo/Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-white mb-2">DropBoard</h1>
-          <p className="text-gray-400">Dropshipping Dashboard</p>
+          <p className="text-gray-400">Start your dropshipping journey</p>
         </div>
 
-        {/* Login Card */}
+        {/* Signup Card */}
         <div className="card">
-          <h2 className="text-2xl font-bold text-white mb-6">Welcome Back</h2>
+          <h2 className="text-2xl font-bold text-white mb-6">Create Account</h2>
 
           {/* Error Message */}
           {error && (
@@ -107,8 +126,33 @@ export default function Login() {
             </div>
           )}
 
+          {/* Success Message */}
+          {success && (
+            <div className="bg-green-500/10 border border-green-500/30 text-green-400 px-4 py-3 rounded-lg mb-6 flex items-center gap-2 animate-pulse">
+              <Check size={18} />
+              Account created! Redirecting...
+            </div>
+          )}
+
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Store Name */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-300 mb-2">Store Name</label>
+              <div className="relative">
+                <Store size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" />
+                <input
+                  type="text"
+                  value={formData.storeName}
+                  onChange={(e) => setFormData({ ...formData, storeName: e.target.value })}
+                  placeholder="My Awesome Store"
+                  className="input-field pl-10"
+                  disabled={loading}
+                  required
+                />
+              </div>
+            </div>
+
             {/* Email */}
             <div>
               <label className="block text-sm font-semibold text-gray-300 mb-2">Email Address</label>
@@ -135,7 +179,7 @@ export default function Login() {
                   type={showPassword ? 'text' : 'password'}
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  placeholder="Enter your password"
+                  placeholder="At least 6 characters"
                   className="input-field pl-10 pr-10"
                   disabled={loading}
                   required
@@ -151,10 +195,37 @@ export default function Login() {
               </div>
             </div>
 
-            {/* Remember Me */}
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" className="w-4 h-4 rounded accent-green-500" disabled={loading} />
-              <span className="text-sm text-gray-400">Remember me</span>
+            {/* Confirm Password */}
+            <div>
+              <label className="block text-sm font-semibold text-gray-300 mb-2">Confirm Password</label>
+              <div className="relative">
+                <Lock size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" />
+                <input
+                  type={showConfirmPassword ? 'text' : 'password'}
+                  value={formData.confirmPassword}
+                  onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                  placeholder="Confirm your password"
+                  className="input-field pl-10 pr-10"
+                  disabled={loading}
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  disabled={loading}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-300 disabled:opacity-50"
+                >
+                  {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
+              </div>
+            </div>
+
+            {/* Terms */}
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input type="checkbox" className="w-4 h-4 rounded accent-green-500 mt-1" disabled={loading} required />
+              <span className="text-xs text-gray-400">
+                I agree to the Terms of Service and Privacy Policy
+              </span>
             </label>
 
             {/* Submit Button */}
@@ -166,10 +237,10 @@ export default function Login() {
               {loading ? (
                 <>
                   <Loader size={20} className="animate-spin" />
-                  Logging in...
+                  Creating account...
                 </>
               ) : (
-                'Login'
+                'Create Account'
               )}
             </button>
           </form>
@@ -180,30 +251,38 @@ export default function Login() {
               <div className="w-full border-t border-gray-700"></div>
             </div>
             <div className="relative flex justify-center text-sm">
-              <span className="px-2 bg-secondary text-gray-400">New to DropBoard?</span>
+              <span className="px-2 bg-secondary text-gray-400">Already have an account?</span>
             </div>
           </div>
 
-          {/* Sign Up Link */}
+          {/* Login Link */}
           <p className="text-center text-gray-400">
-            Don't have an account?{' '}
-            <Link href="/auth/signup" className="text-accent hover:text-emerald-400 font-semibold transition">
-              Sign up for free
+            <Link href="/auth/login" className="text-accent hover:text-emerald-400 font-semibold transition">
+              Sign in instead
             </Link>
           </p>
         </div>
 
-        {/* Demo Credentials */}
-        <div className="mt-6 bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
-          <p className="text-sm text-blue-400 font-semibold mb-2">💡 Multi-Device Login</p>
-          <p className="text-xs text-gray-400">
-            Your account works on any browser, any device, anytime!
-          </p>
+        {/* Features */}
+        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-3">
+          {[
+            'Real-time order tracking',
+            'Profit calculations',
+            'Inventory management',
+            'Supplier integration',
+            'Revenue analytics',
+            'Secure data storage',
+          ].map((feature, idx) => (
+            <div key={idx} className="flex items-center gap-2 text-xs text-gray-400">
+              <Check size={16} className="text-accent flex-shrink-0" />
+              <span>{feature}</span>
+            </div>
+          ))}
         </div>
 
         {/* Footer */}
         <p className="text-center text-xs text-gray-500 mt-6">
-          Protected by encryption and secure authentication
+          Your data is encrypted and secure
         </p>
       </div>
     </div>
