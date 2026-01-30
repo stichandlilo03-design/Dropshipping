@@ -1,10 +1,68 @@
+Find this section in your current app/page.jsx:
+
+        {/* Page Header */}
+        <div>
+          <h2 className="text-4xl font-bold text-white mb-2">Welcome back, {user.storeName}!</h2>
+          <p className="text-gray-400">Here's your business overview</p>
+        </div>
+
+REPLACE IT WITH THIS:
+
+        {/* Page Header - PERSONALIZED WELCOME */}
+        <div className="space-y-2 mb-8">
+          <h2 className="text-5xl font-bold text-white">
+            Welcome back to <span className="text-accent">{user.storeName}</span>! 👋
+          </h2>
+          <p className="text-lg text-gray-400">
+            {getWelcomeMessage(user.storeName, analytics.totalOrders)}
+          </p>
+          <div className="flex items-center gap-2 text-sm text-gray-500 mt-4">
+            <span>📧 {user.email}</span>
+            <span className="text-gray-700">•</span>
+            <span>Account ID: {user.id.substring(0, 8)}...</span>
+          </div>
+        </div>
+
+Then ADD THIS FUNCTION before the return statement:
+
+  const getWelcomeMessage = (storeName, totalOrders) => {
+    const hour = new Date().getHours();
+    let timeGreeting = '';
+    
+    if (hour < 12) {
+      timeGreeting = 'Good morning';
+    } else if (hour < 18) {
+      timeGreeting = 'Good afternoon';
+    } else {
+      timeGreeting = 'Good evening';
+    }
+
+    if (totalOrders === 0) {
+      return `${timeGreeting}! Start by adding your first product and order to begin your dropshipping journey.`;
+    } else if (totalOrders < 10) {
+      return `${timeGreeting}! You're building momentum with ${totalOrders} orders. Keep it up! 🚀`;
+    } else if (totalOrders < 50) {
+      return `${timeGreeting}! Great work! ${totalOrders} orders processed. You're on the right track! 💪`;
+    } else if (totalOrders < 100) {
+      return `${timeGreeting}! Amazing! ${totalOrders} orders and counting. You're scaling! 📈`;
+    } else {
+      return `${timeGreeting}! Outstanding! ${totalOrders} orders processed. ${user.storeName} is thriving! 🌟`;
+    }
+  };
+
+================================================================================
+
+COMPLETE UPDATED DASHBOARD CODE:
+
+Replace your entire app/page.jsx with this:
+
 'use client';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DollarSign, ShoppingCart, Package, TrendingUp, Zap, Users, LogOut, Settings, Download, Upload, BookOpen, ArrowRight } from 'lucide-react';
+import { DollarSign, ShoppingCart, Package, TrendingUp, Zap, Users, LogOut, Settings, Download, Upload, BookOpen, ArrowRight, Plus } from 'lucide-react';
 import { getUser, logout, getToken } from '@/lib/auth';
 import { db } from '@/lib/database';
 
@@ -56,8 +114,33 @@ export default function Dashboard() {
       const url = URL.createObjectURL(dataBlob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `dropshipping_backup_${Date.now()}.json`;
+      link.download = `${user.storeName}_backup_${Date.now()}.json`;
       link.click();
+    }
+  };
+
+  const getWelcomeMessage = (storeName, totalOrders) => {
+    const hour = new Date().getHours();
+    let timeGreeting = '';
+    
+    if (hour < 12) {
+      timeGreeting = 'Good morning';
+    } else if (hour < 18) {
+      timeGreeting = 'Good afternoon';
+    } else {
+      timeGreeting = 'Good evening';
+    }
+
+    if (totalOrders === 0) {
+      return `${timeGreeting}! Start by adding your first product and order to begin your dropshipping journey.`;
+    } else if (totalOrders < 10) {
+      return `${timeGreeting}! You're building momentum with ${totalOrders} orders. Keep it up! 🚀`;
+    } else if (totalOrders < 50) {
+      return `${timeGreeting}! Great work! ${totalOrders} orders processed. You're on the right track! 💪`;
+    } else if (totalOrders < 100) {
+      return `${timeGreeting}! Amazing! ${totalOrders} orders and counting. You're scaling! 📈`;
+    } else {
+      return `${timeGreeting}! Outstanding! ${totalOrders} orders processed. ${storeName} is thriving! 🌟`;
     }
   };
 
@@ -126,10 +209,19 @@ export default function Dashboard() {
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
-        {/* Page Header */}
-        <div>
-          <h2 className="text-4xl font-bold text-white mb-2">Welcome back, {user.storeName}!</h2>
-          <p className="text-gray-400">Here's your business overview</p>
+        {/* Page Header - PERSONALIZED WELCOME */}
+        <div className="space-y-2 mb-8">
+          <h2 className="text-5xl font-bold text-white">
+            Welcome back to <span className="text-accent">{user.storeName}</span>! 👋
+          </h2>
+          <p className="text-lg text-gray-400">
+            {getWelcomeMessage(user.storeName, analytics.totalOrders)}
+          </p>
+          <div className="flex items-center gap-2 text-sm text-gray-500 mt-4">
+            <span>📧 {user.email}</span>
+            <span className="text-gray-700">•</span>
+            <span>Account ID: {user.id.substring(0, 8)}...</span>
+          </div>
         </div>
 
         {/* Status Banner */}
@@ -314,7 +406,7 @@ export default function Dashboard() {
               </div>
             </Link>
 
-            {/* Integrations - NEW */}
+            {/* Integrations */}
             <Link href="/integrations" className="card group hover:border-accent transition">
               <Zap size={24} className="text-yellow-400 mb-2" />
               <p className="font-semibold text-white group-hover:text-accent transition">Integrations</p>
@@ -326,7 +418,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Help Section - NEW */}
+        {/* Help Section */}
         <div>
           <h3 className="text-2xl font-bold text-white mb-6">Need Help?</h3>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -394,6 +486,3 @@ export default function Dashboard() {
     </div>
   );
 }
-
-import { Plus } from 'lucide-react';
-
