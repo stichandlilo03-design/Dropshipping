@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Save, AlertCircle, Check, ArrowLeft, LogOut, User, Mail } from 'lucide-react';
 import { getUser, getToken, logout } from '@/lib/auth';
 import { db } from '@/lib/database';
+import { getFirestore, doc, updateDoc } from 'firebase/firestore';
 
 export default function Settings() {
   const router = useRouter();
@@ -47,7 +48,7 @@ export default function Settings() {
   }, [router]);
 
   const loadSettings = (currentUser) => {
-    // Load from localStorage
+    // Load from localStorage user object
     setStoreName(currentUser.storeName || '');
     setEmail(currentUser.email || '');
     
@@ -97,7 +98,7 @@ export default function Settings() {
         dailySummary,
       };
 
-      // Save settings object
+      // Save settings object to localStorage
       localStorage.setItem('settings', JSON.stringify(allSettings));
 
       // Update user object with new store name and email
@@ -109,6 +110,24 @@ export default function Settings() {
 
       // Save updated user to localStorage
       localStorage.setItem('user', JSON.stringify(updatedUser));
+
+      // IMPORTANT: Also update Firebase Firestore so changes persist after logout/login
+      try {
+        const firestoreDb = getFirestore();
+        const userDocRef = doc(firestoreDb, 'users', user.id);
+        
+        await updateDoc(userDocRef, {
+          storeName: storeName,
+          email: email,
+          settings: allSettings,
+          updatedAt: new Date().toISOString(),
+        });
+
+        console.log('✅ Settings saved to Firebase Firestore');
+      } catch (firestoreError) {
+        console.error('Firebase save warning (non-critical):', firestoreError);
+        // Don't fail if Firebase save fails, localStorage is backup
+      }
 
       // Update state
       setUser(updatedUser);
@@ -409,3 +428,4 @@ export default function Settings() {
     </div>
   );
 }
+
