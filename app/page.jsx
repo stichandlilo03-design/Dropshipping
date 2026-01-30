@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DollarSign, ShoppingCart, Package, TrendingUp, Zap, Users, LogOut, Settings, Download, Upload, BookOpen, ArrowRight, Plus } from 'lucide-react';
+import { DollarSign, ShoppingCart, Package, TrendingUp, Zap, Users, LogOut, Settings, Download, BookOpen, ArrowRight, Plus, Flame, Smartphone, Share2, Link as LinkIcon, Eye } from 'lucide-react';
 import { getUser, logout, getToken } from '@/lib/auth';
 import { db } from '@/lib/database';
 
@@ -175,7 +175,7 @@ export default function Dashboard() {
                 <p className="text-sm text-gray-400 mb-4">
                   Connect your store, add suppliers, and start automating orders.
                 </p>
-                <div className="flex gap-3">
+                <div className="flex gap-3 flex-wrap">
                   <Link href="/integrations" className="btn btn-primary text-sm flex items-center gap-2">
                     <Zap size={16} />
                     Setup Integrations
@@ -259,6 +259,98 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* Trending Products Widget */}
+        <div>
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-2xl font-bold text-white flex items-center gap-2">
+              <Flame size={28} className="text-orange-400" />
+              🔥 Trending Right Now
+            </h3>
+            <Link href="/trending" className="text-accent hover:text-emerald-400 font-semibold transition text-sm">
+              View All →
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Trending Product 1 */}
+            <div className="card bg-gradient-to-br from-orange-500/10 to-red-500/10 border border-orange-500/30 group hover:border-accent transition">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex-1">
+                  <p className="text-xs text-orange-400 font-bold">🔥 TRENDING #1</p>
+                  <h4 className="text-base font-bold text-white">Programmer Coffee T-Shirt</h4>
+                </div>
+                <span className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-2 py-1 rounded text-xs font-bold">9.2/10</span>
+              </div>
+              <p className="text-xs text-gray-400 mb-3">Perfect for developers</p>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <p className="text-xs text-gray-400">Est. Sales</p>
+                  <p className="text-sm font-bold text-white">500+</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-gray-400">Margin</p>
+                  <p className="text-sm font-bold text-green-400">58%</p>
+                </div>
+              </div>
+              <Link href="/trending" className="w-full btn btn-primary text-xs flex items-center justify-center gap-2 py-2">
+                <Plus size={14} />
+                Add to Store
+              </Link>
+            </div>
+
+            {/* Trending Product 2 */}
+            <div className="card bg-gradient-to-br from-pink-500/10 to-purple-500/10 border border-pink-500/30 group hover:border-accent transition">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex-1">
+                  <p className="text-xs text-pink-400 font-bold">🔥 TRENDING #2</p>
+                  <h4 className="text-base font-bold text-white">Dog Mom Hoodie</h4>
+                </div>
+                <span className="bg-gradient-to-r from-pink-500 to-purple-500 text-white px-2 py-1 rounded text-xs font-bold">8.7/10</span>
+              </div>
+              <p className="text-xs text-gray-400 mb-3">For dog lovers</p>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <p className="text-xs text-gray-400">Est. Sales</p>
+                  <p className="text-sm font-bold text-white">800+</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-gray-400">Margin</p>
+                  <p className="text-sm font-bold text-green-400">62%</p>
+                </div>
+              </div>
+              <Link href="/trending" className="w-full btn btn-primary text-xs flex items-center justify-center gap-2 py-2">
+                <Plus size={14} />
+                Add to Store
+              </Link>
+            </div>
+
+            {/* Trending Product 3 */}
+            <div className="card bg-gradient-to-br from-green-500/10 to-teal-500/10 border border-green-500/30 group hover:border-accent transition">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex-1">
+                  <p className="text-xs text-green-400 font-bold">🔥 TRENDING #3</p>
+                  <h4 className="text-base font-bold text-white">Yoga Zen Mug</h4>
+                </div>
+                <span className="bg-gradient-to-r from-green-500 to-teal-500 text-white px-2 py-1 rounded text-xs font-bold">8.1/10</span>
+              </div>
+              <p className="text-xs text-gray-400 mb-3">Perfect for yoga lovers</p>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <p className="text-xs text-gray-400">Est. Sales</p>
+                  <p className="text-sm font-bold text-white">1,200+</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-gray-400">Margin</p>
+                  <p className="text-sm font-bold text-green-400">64%</p>
+                </div>
+              </div>
+              <Link href="/trending" className="w-full btn btn-primary text-xs flex items-center justify-center gap-2 py-2">
+                <Plus size={14} />
+                Add to Store
+              </Link>
+            </div>
+          </div>
+        </div>
+
         {/* Charts */}
         {orders.length > 0 && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -328,6 +420,16 @@ export default function Dashboard() {
               </div>
             </Link>
 
+            {/* Trending */}
+            <Link href="/trending" className="card group hover:border-accent transition">
+              <Flame size={24} className="text-orange-400 mb-2" />
+              <p className="font-semibold text-white group-hover:text-accent transition">Trending</p>
+              <p className="text-xs text-gray-400">Hot products</p>
+              <div className="flex items-center gap-1 text-accent text-xs mt-3">
+                Discover <ArrowRight size={12} />
+              </div>
+            </Link>
+
             {/* Analytics */}
             <Link href="/analytics" className="card group hover:border-accent transition">
               <TrendingUp size={24} className="text-green-400 mb-2" />
@@ -347,14 +449,40 @@ export default function Dashboard() {
                 View <ArrowRight size={12} />
               </div>
             </Link>
+          </div>
+        </div>
 
-            {/* Integrations */}
-            <Link href="/integrations" className="card group hover:border-accent transition">
-              <Zap size={24} className="text-yellow-400 mb-2" />
-              <p className="font-semibold text-white group-hover:text-accent transition">Integrations</p>
-              <p className="text-xs text-gray-400">{connectedCount} connected</p>
-              <div className="flex items-center gap-1 text-accent text-xs mt-3">
-                Setup <ArrowRight size={12} />
+        {/* New Features Section */}
+        <div>
+          <h3 className="text-2xl font-bold text-white mb-6">💼 Business Tools</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Product Manager */}
+            <Link href="/products-manager" className="card group hover:border-accent transition">
+              <LinkIcon size={24} className="text-blue-400 mb-2" />
+              <h4 className="font-bold text-white mb-2">Product Manager</h4>
+              <p className="text-xs text-gray-400 mb-4">Manage URLs, direct links for ads, bulk edit products</p>
+              <div className="flex items-center gap-1 text-accent text-xs">
+                Manage <ArrowRight size={12} />
+              </div>
+            </Link>
+
+            {/* Social Media */}
+            <Link href="/social-publish" className="card group hover:border-accent transition">
+              <Share2 size={24} className="text-pink-400 mb-2" />
+              <h4 className="font-bold text-white mb-2">Social Media</h4>
+              <p className="text-xs text-gray-400 mb-4">Auto-publish to TikTok, Instagram, Facebook</p>
+              <div className="flex items-center gap-1 text-accent text-xs">
+                Publish <ArrowRight size={12} />
+              </div>
+            </Link>
+
+            {/* Marketing */}
+            <Link href="/marketing" className="card group hover:border-accent transition">
+              <Smartphone size={24} className="text-green-400 mb-2" />
+              <h4 className="font-bold text-white mb-2">Marketing</h4>
+              <p className="text-xs text-gray-400 mb-4">Create campaigns, ads, track ROI</p>
+              <div className="flex items-center gap-1 text-accent text-xs">
+                Create <ArrowRight size={12} />
               </div>
             </Link>
           </div>
@@ -409,13 +537,13 @@ export default function Dashboard() {
             <h3 className="text-xl font-bold text-white mb-2">Ready to get started?</h3>
             <p className="text-gray-400 mb-6">Add your first product and order to see your dashboard come alive</p>
             <div className="flex gap-4 justify-center flex-wrap">
-              <Link href="/products" className="btn btn-primary flex items-center gap-2">
+              <Link href="/trending" className="btn btn-primary flex items-center gap-2">
+                <Flame size={16} />
+                Find Trending Products
+              </Link>
+              <Link href="/products" className="btn btn-secondary flex items-center gap-2">
                 <Plus size={16} />
                 Add Product
-              </Link>
-              <Link href="/orders" className="btn btn-secondary flex items-center gap-2">
-                <Plus size={16} />
-                Add Order
               </Link>
               <Link href="/help" className="btn btn-secondary flex items-center gap-2">
                 <BookOpen size={16} />
