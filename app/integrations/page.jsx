@@ -88,7 +88,7 @@ const INTEGRATIONS = [
     fields: [
       { name: 'API Key', key: 'apiKey', type: 'password', placeholder: 'Your Google Cloud API key' },
     ],
-    docs: 'https://trends.google.com/trends/api',
+    docs: 'https://trends.google.com/trends/',
     status: 'disconnected',
   },
   {
@@ -473,3 +473,4 @@ export default function Integrations() {
     </div>
   );
 }
+
