@@ -3,10 +3,9 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, LogOut, Settings, Check, AlertCircle, Copy, Eye, EyeOff, Loader } from 'lucide-react';
+import { ArrowLeft, LogOut, Settings, Check, AlertCircle, Eye, EyeOff, Loader } from 'lucide-react';
 import { getUser, getToken } from '@/lib/auth';
 
-// Integration configurations
 const INTEGRATIONS = [
   {
     id: 'printful',
@@ -14,12 +13,80 @@ const INTEGRATIONS = [
     icon: '📦',
     category: 'Print-on-Demand',
     description: 'Connect Printful for custom print products and fulfillment',
-    color: 'from-blue-500 to-blue-600',
     fields: [
-      { name: 'API Key', key: 'apiKey', type: 'password', placeholder: 'Your Printful API key' },
-      { name: 'Store ID', key: 'storeId', type: 'text', placeholder: 'Your Printful store ID' },
+      { 
+        name: 'Client ID', 
+        key: 'clientId', 
+        type: 'text', 
+        placeholder: 'Your Printful Client ID',
+        help: 'Get from: Printful Dashboard → Apps → Your App → Credentials'
+      },
+      { 
+        name: 'Client Secret', 
+        key: 'clientSecret', 
+        type: 'password', 
+        placeholder: 'Your Printful Client Secret',
+        help: 'Get from: Printful Dashboard → Apps → Your App → Credentials'
+      },
     ],
-    docs: 'https://www.printful.com/api',
+    docs: 'https://developers.printful.com/docs',
+    status: 'disconnected',
+  },
+  {
+    id: 'tiktok',
+    name: 'TikTok Shop',
+    icon: '🎵',
+    category: 'Social Commerce',
+    description: 'Auto-publish videos to TikTok and sell directly',
+    fields: [
+      { 
+        name: 'Client Key', 
+        key: 'clientKey', 
+        type: 'text', 
+        placeholder: 'Your TikTok Client Key',
+        help: 'Get from: TikTok Developers → Your App → App details → Credentials'
+      },
+      { 
+        name: 'Client Secret', 
+        key: 'clientSecret', 
+        type: 'password', 
+        placeholder: 'Your TikTok Client Secret',
+        help: 'Get from: TikTok Developers → Your App → App details → Credentials'
+      },
+      { 
+        name: 'Redirect URI', 
+        key: 'redirectUri', 
+        type: 'text', 
+        placeholder: 'https://yoursite.com/api/auth/tiktok/callback',
+        help: 'Must match URI in TikTok app settings'
+      },
+    ],
+    docs: 'https://developers.tiktok.com/doc/content-posting-api-reference-direct-post',
+    status: 'disconnected',
+  },
+  {
+    id: 'shopify',
+    name: 'Shopify',
+    icon: '🛍️',
+    category: 'Store Integration',
+    description: 'Integrate with your Shopify store to sync products and orders',
+    fields: [
+      { 
+        name: 'Store URL', 
+        key: 'storeUrl', 
+        type: 'text', 
+        placeholder: 'your-store.myshopify.com',
+        help: 'Your Shopify store domain'
+      },
+      { 
+        name: 'Access Token', 
+        key: 'accessToken', 
+        type: 'password', 
+        placeholder: 'Your Shopify Access Token',
+        help: 'Get from: Shopify Admin → Settings → Apps and integrations → Develop apps'
+      },
+    ],
+    docs: 'https://shopify.dev/docs/admin-api/graphql',
     status: 'disconnected',
   },
   {
@@ -28,26 +95,23 @@ const INTEGRATIONS = [
     icon: '💳',
     category: 'Payment Processing',
     description: 'Accept payments from customers worldwide',
-    color: 'from-purple-500 to-purple-600',
     fields: [
-      { name: 'Publishable Key', key: 'publishableKey', type: 'text', placeholder: 'pk_live_...' },
-      { name: 'Secret Key', key: 'secretKey', type: 'password', placeholder: 'sk_live_...' },
+      { 
+        name: 'Publishable Key', 
+        key: 'publishableKey', 
+        type: 'text', 
+        placeholder: 'pk_live_...',
+        help: 'Get from: Stripe Dashboard → Developers → API Keys'
+      },
+      { 
+        name: 'Secret Key', 
+        key: 'secretKey', 
+        type: 'password', 
+        placeholder: 'sk_live_...',
+        help: 'Get from: Stripe Dashboard → Developers → API Keys'
+      },
     ],
     docs: 'https://stripe.com/docs/keys',
-    status: 'disconnected',
-  },
-  {
-    id: 'tiktok',
-    name: 'TikTok Shop',
-    icon: '🎵',
-    category: 'Social Commerce',
-    description: 'Sell directly on TikTok Shop and access trending products',
-    color: 'from-black to-gray-800',
-    fields: [
-      { name: 'Access Token', key: 'accessToken', type: 'password', placeholder: 'Your TikTok access token' },
-      { name: 'Shop ID', key: 'shopId', type: 'text', placeholder: 'Your TikTok shop ID' },
-    ],
-    docs: 'https://developers.tiktok.com/doc/shop-api-overview',
     status: 'disconnected',
   },
   {
@@ -56,10 +120,21 @@ const INTEGRATIONS = [
     icon: '📷',
     category: 'Social Commerce',
     description: 'Create shoppable posts on Instagram',
-    color: 'from-pink-500 to-purple-600',
     fields: [
-      { name: 'Business Account ID', key: 'businessAccountId', type: 'text', placeholder: 'Your Instagram business account ID' },
-      { name: 'Access Token', key: 'accessToken', type: 'password', placeholder: 'Your Instagram access token' },
+      { 
+        name: 'Business Account ID', 
+        key: 'businessAccountId', 
+        type: 'text', 
+        placeholder: 'Your Instagram Business Account ID',
+        help: 'Get from: Meta Business Suite → Settings → Instagram Accounts'
+      },
+      { 
+        name: 'Access Token', 
+        key: 'accessToken', 
+        type: 'password', 
+        placeholder: 'Your Instagram Access Token',
+        help: 'Get from: Meta for Developers → Your App → Tools → Access Token'
+      },
     ],
     docs: 'https://developers.facebook.com/docs/instagram-api',
     status: 'disconnected',
@@ -70,38 +145,23 @@ const INTEGRATIONS = [
     icon: '👍',
     category: 'Social Commerce',
     description: 'Set up Facebook Shop for product sales',
-    color: 'from-blue-600 to-blue-700',
     fields: [
-      { name: 'Page ID', key: 'pageId', type: 'text', placeholder: 'Your Facebook page ID' },
-      { name: 'Access Token', key: 'accessToken', type: 'password', placeholder: 'Your Facebook access token' },
+      { 
+        name: 'Page ID', 
+        key: 'pageId', 
+        type: 'text', 
+        placeholder: 'Your Facebook Page ID',
+        help: 'Get from: Facebook Page → About → Page ID'
+      },
+      { 
+        name: 'Access Token', 
+        key: 'accessToken', 
+        type: 'password', 
+        placeholder: 'Your Facebook Access Token',
+        help: 'Get from: Meta for Developers → Your App → Tools → Access Token'
+      },
     ],
     docs: 'https://developers.facebook.com/docs/facebook-shop',
-    status: 'disconnected',
-  },
-  {
-    id: 'google-trends',
-    name: 'Google Trends',
-    icon: '📈',
-    category: 'Analytics & Trends',
-    description: 'Get trending keywords and product insights',
-    color: 'from-yellow-500 to-red-600',
-    fields: [
-      { name: 'API Key', key: 'apiKey', type: 'password', placeholder: 'Your Google Cloud API key' },
-    ],
-    docs: 'https://trends.google.com/trends/',
-    status: 'disconnected',
-  },
-  {
-    id: 'sendgrid',
-    name: 'SendGrid',
-    icon: '📧',
-    category: 'Email Marketing',
-    description: 'Send transactional and marketing emails',
-    color: 'from-red-500 to-orange-600',
-    fields: [
-      { name: 'API Key', key: 'apiKey', type: 'password', placeholder: 'Your SendGrid API key' },
-    ],
-    docs: 'https://sendgrid.com/docs/for-developers/getting-started/api-authentication',
     status: 'disconnected',
   },
   {
@@ -110,25 +170,55 @@ const INTEGRATIONS = [
     icon: '🌍',
     category: 'Dropshipping',
     description: 'Connect verified US and EU suppliers',
-    color: 'from-green-500 to-emerald-600',
     fields: [
-      { name: 'API Key', key: 'apiKey', type: 'password', placeholder: 'Your Spocket API key' },
+      { 
+        name: 'API Key', 
+        key: 'apiKey', 
+        type: 'password', 
+        placeholder: 'Your Spocket API Key',
+        help: 'Get from: Spocket Dashboard → Settings → API Keys'
+      },
     ],
     docs: 'https://app.spocket.co/api',
     status: 'disconnected',
   },
   {
-    id: 'shopify',
-    name: 'Shopify',
-    icon: '🛍️',
-    category: 'Store Integration',
-    description: 'Integrate with your Shopify store',
-    color: 'from-green-600 to-teal-600',
+    id: 'gmail-smtp',
+    name: 'Gmail / SMTP',
+    icon: '📧',
+    category: 'Email Marketing',
+    description: 'Send emails through Gmail, Outlook, or custom SMTP',
     fields: [
-      { name: 'Store URL', key: 'storeUrl', type: 'text', placeholder: 'your-store.myshopify.com' },
-      { name: 'Access Token', key: 'accessToken', type: 'password', placeholder: 'Your Shopify access token' },
+      { 
+        name: 'Email Address', 
+        key: 'emailAddress', 
+        type: 'email', 
+        placeholder: 'your-email@gmail.com',
+        help: 'Your email address for sending'
+      },
+      { 
+        name: 'SMTP Host', 
+        key: 'smtpHost', 
+        type: 'text', 
+        placeholder: 'smtp.gmail.com',
+        help: 'SMTP server (smtp.gmail.com, smtp-mail.outlook.com, etc)'
+      },
+      { 
+        name: 'SMTP Port', 
+        key: 'smtpPort', 
+        type: 'text', 
+        placeholder: '587',
+        help: 'Usually 587 (TLS) or 465 (SSL)'
+      },
+      { 
+        name: 'App Password', 
+        key: 'appPassword', 
+        type: 'password', 
+        placeholder: 'Your app-specific password',
+        help: 'For Gmail: Enable 2FA and create app password'
+      },
     ],
-    docs: 'https://shopify.dev/docs/admin-api',
+    docs: 'https://support.google.com/accounts/answer/185833',
     status: 'disconnected',
   },
 ];
@@ -188,7 +278,6 @@ export default function Integrations() {
 
     setLoading({ ...loading, [integrationId]: true });
     try {
-      // Validate connection
       const response = await fetch(`/api/integrations/${integrationId}/validate`, {
         method: 'POST',
         headers: {
@@ -198,18 +287,18 @@ export default function Integrations() {
       });
 
       if (response.ok) {
-        // Save to localStorage
+        const result = await response.json();
+        
         const saved = JSON.parse(localStorage.getItem('integrations') || '{}');
-        saved[integrationId] = data;
+        saved[integrationId] = result.credentials || data;
         localStorage.setItem('integrations', JSON.stringify(saved));
 
-        // Update state
         const updated = integrations.map(i => {
           if (i.id === integrationId) {
             return {
               ...i,
               status: 'connected',
-              data,
+              data: result.credentials || data,
             };
           }
           return i;
@@ -220,7 +309,8 @@ export default function Integrations() {
         setNotification(`✅ ${integration.name} connected successfully!`);
         setTimeout(() => setNotification(''), 3000);
       } else {
-        setNotification(`❌ Failed to connect. Check your credentials.`);
+        const error = await response.json();
+        setNotification(`❌ ${error.error || 'Connection failed'}`);
       }
     } catch (error) {
       console.error('Connection error:', error);
@@ -312,7 +402,7 @@ export default function Integrations() {
         )}
 
         {/* Categories */}
-        {['Print-on-Demand', 'Payment Processing', 'Social Commerce', 'Analytics & Trends', 'Email Marketing', 'Dropshipping', 'Store Integration'].map(category => {
+        {['Print-on-Demand', 'Payment Processing', 'Social Commerce', 'Email Marketing', 'Dropshipping', 'Store Integration'].map(category => {
           const categoryIntegrations = integrations.filter(i => i.category === category);
           if (categoryIntegrations.length === 0) return null;
 
@@ -322,7 +412,6 @@ export default function Integrations() {
                 {category === 'Print-on-Demand' && '📦'}
                 {category === 'Payment Processing' && '💳'}
                 {category === 'Social Commerce' && '📱'}
-                {category === 'Analytics & Trends' && '📊'}
                 {category === 'Email Marketing' && '📧'}
                 {category === 'Dropshipping' && '🌍'}
                 {category === 'Store Integration' && '🛍️'}
@@ -350,7 +439,7 @@ export default function Integrations() {
                           <h3 className="font-bold text-white">{integration.name}</h3>
                           <p className="text-xs text-gray-400 mt-1">{integration.description}</p>
                         </div>
-                        <div className={`px-3 py-1 rounded-full text-xs font-bold ${
+                        <div className={`px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap ${
                           integration.status === 'connected'
                             ? 'bg-green-500/20 text-green-400'
                             : 'bg-gray-700 text-gray-300'
@@ -359,7 +448,6 @@ export default function Integrations() {
                         </div>
                       </div>
 
-                      {/* Expand indicator */}
                       {integration.status === 'disconnected' && (
                         <p className="text-xs text-gray-500">Click to connect →</p>
                       )}
@@ -367,7 +455,7 @@ export default function Integrations() {
 
                     {/* Expanded Form */}
                     {expandedId === integration.id && integration.status === 'disconnected' && (
-                      <div className="pt-4 border-t border-gray-700 space-y-4">
+                      <div className="pt-4 border-t border-gray-700 space-y-3">
                         {integration.fields.map(field => (
                           <div key={field.key}>
                             <label className="block text-xs font-semibold text-gray-300 mb-1">{field.name}</label>
@@ -387,10 +475,11 @@ export default function Integrations() {
                                   })}
                                   className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-white"
                                 >
-                                  {showKeys[`${integration.id}-${field.key}`] ? <EyeOff size={16} /> : <Eye size={16} />}
+                                  {showKeys[`${integration.id}-${field.key}`] ? <EyeOff size={14} /> : <Eye size={14} />}
                                 </button>
                               )}
                             </div>
+                            <p className="text-xs text-gray-500 mt-1">{field.help}</p>
                           </div>
                         ))}
 
@@ -416,7 +505,7 @@ export default function Integrations() {
                             href={integration.docs}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="flex-1 btn btn-secondary text-sm"
+                            className="flex-1 btn btn-secondary text-sm text-center"
                           >
                             📖 Docs
                           </a>
@@ -449,22 +538,22 @@ export default function Integrations() {
 
         {/* Summary Card */}
         <div className="card bg-gradient-to-br from-accent/10 to-blue-500/10 border border-accent/30">
-          <h3 className="text-lg font-bold text-white mb-4">🚀 Next Steps</h3>
+          <h3 className="text-lg font-bold text-white mb-4">🚀 Setup Checklist</h3>
           <div className="grid md:grid-cols-2 gap-4 text-sm">
             <div>
-              <p className="font-semibold text-white mb-2">Recommended Priority:</p>
-              <ol className="text-gray-400 space-y-1 list-decimal list-inside">
-                <li>Printful (Print-on-Demand)</li>
-                <li>Stripe (Accept payments)</li>
-                <li>TikTok Shop (Social selling)</li>
-              </ol>
+              <p className="font-semibold text-white mb-2">Essential APIs:</p>
+              <ul className="text-gray-400 space-y-2">
+                <li className={connected >= 1 ? '✅ text-green-400' : '⭕'}>Printful (Products)</li>
+                <li className={connected >= 2 ? '✅ text-green-400' : '⭕'}>Stripe (Payments)</li>
+                <li className={connected >= 3 ? '✅ text-green-400' : '⭕'}>TikTok (Social)</li>
+              </ul>
             </div>
             <div>
-              <p className="font-semibold text-white mb-2">After connecting APIs:</p>
-              <ul className="text-gray-400 space-y-1 list-disc list-inside">
+              <p className="font-semibold text-white mb-2">What happens when connected:</p>
+              <ul className="text-gray-400 space-y-2 list-disc list-inside">
                 <li>Trending products auto-populate</li>
                 <li>Social publishing activates</li>
-                <li>Payment processing works</li>
+                <li>Orders sync automatically</li>
               </ul>
             </div>
           </div>
@@ -473,4 +562,3 @@ export default function Integrations() {
     </div>
   );
 }
-
