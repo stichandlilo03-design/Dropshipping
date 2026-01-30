@@ -3,41 +3,20 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Mail, Lock, Store, Eye, EyeOff, AlertCircle, Check } from 'lucide-react';
-import { registerUser } from '@/lib/firebase';
+import { Mail, Lock, Eye, EyeOff, AlertCircle, Loader } from 'lucide-react';
+import { loginUser } from '@/lib/firebase';
+import { generateToken, saveUser } from '@/lib/auth';
+import { getFirestore, doc, getDoc } from 'firebase/firestore';
 
-export default function Signup() {
+export default function Login() {
   const router = useRouter();
   const [formData, setFormData] = useState({
-    storeName: '',
     email: '',
     password: '',
-    confirmPassword: '',
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-
-  const validateForm = () => {
-    if (!formData.storeName.trim()) {
-      setError('Store name is required');
-      return false;
-    }
-    if (!formData.email.includes('@')) {
-      setError('Invalid email address');
-      return false;
-    }
-    if (formData.password.length < 6) {
-      setError('Password must be at least 6 characters');
-      return false;
-    }
-    if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
-      return false;
-    }
-    return true;
-  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -45,39 +24,60 @@ export default function Signup() {
     setLoading(true);
 
     try {
-      if (!validateForm()) {
+      // Validate
+      if (!formData.email || !formData.password) {
+        setError('Email and password required');
         setLoading(false);
         return;
       }
 
-      // Register with Firebase
-      const result = await registerUser(
-        formData.email,
-        formData.password,
-        formData.storeName
-      );
+      // Login with Firebase
+      const result = await loginUser(formData.email, formData.password);
 
       if (!result.success) {
-        setError(result.error || 'Registration failed');
+        setError(result.error || 'Login failed');
         setLoading(false);
         return;
       }
 
-      // Store user info in localStorage for immediate access
-      localStorage.setItem('user', JSON.stringify({
-        id: result.user.uid,
-        email: result.user.email,
-        storeName: formData.storeName,
-      }));
+      // Get user data from Firestore
+      try {
+        const { db } = await import('@/lib/firebase');
+        const userDoc = await getDoc(doc(db, 'users', result.user.uid));
+        
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          
+          // Generate token
+          const token = generateToken(result.user.uid, result.user.email);
 
-      localStorage.setItem('token', 'firebase_' + result.user.uid);
+          // Save to localStorage
+          saveUser({
+            id: result.user.uid,
+            email: result.user.email,
+            storeName: userData.storeName || 'My Store',
+            token: token,
+          });
+        }
+      } catch (firestoreError) {
+        console.log('Could not fetch user data, but login successful');
+        
+        // Still save user even if Firestore fetch fails
+        const token = generateToken(result.user.uid, result.user.email);
+        saveUser({
+          id: result.user.uid,
+          email: result.user.email,
+          storeName: 'My Store',
+          token: token,
+        });
+      }
 
       // Redirect to dashboard
       router.push('/');
+      
     } catch (err) {
-      setError('Signup failed. Please try again.');
+      setError('Login failed. Please try again.');
       console.error(err);
-    } finally {
       setLoading(false);
     }
   };
@@ -92,12 +92,12 @@ export default function Signup() {
         {/* Logo/Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-white mb-2">DropBoard</h1>
-          <p className="text-gray-400">Start your dropshipping journey</p>
+          <p className="text-gray-400">Dropshipping Dashboard</p>
         </div>
 
-        {/* Signup Card */}
+        {/* Login Card */}
         <div className="card">
-          <h2 className="text-2xl font-bold text-white mb-6">Create Account</h2>
+          <h2 className="text-2xl font-bold text-white mb-6">Welcome Back</h2>
 
           {/* Error Message */}
           {error && (
@@ -109,22 +109,6 @@ export default function Signup() {
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Store Name */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-300 mb-2">Store Name</label>
-              <div className="relative">
-                <Store size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" />
-                <input
-                  type="text"
-                  value={formData.storeName}
-                  onChange={(e) => setFormData({ ...formData, storeName: e.target.value })}
-                  placeholder="My Awesome Store"
-                  className="input-field pl-10"
-                  required
-                />
-              </div>
-            </div>
-
             {/* Email */}
             <div>
               <label className="block text-sm font-semibold text-gray-300 mb-2">Email Address</label>
@@ -136,6 +120,7 @@ export default function Signup() {
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   placeholder="you@example.com"
                   className="input-field pl-10"
+                  disabled={loading}
                   required
                 />
               </div>
@@ -150,49 +135,26 @@ export default function Signup() {
                   type={showPassword ? 'text' : 'password'}
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  placeholder="At least 6 characters"
+                  placeholder="Enter your password"
                   className="input-field pl-10 pr-10"
+                  disabled={loading}
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-300"
+                  disabled={loading}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-300 disabled:opacity-50"
                 >
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
             </div>
 
-            {/* Confirm Password */}
-            <div>
-              <label className="block text-sm font-semibold text-gray-300 mb-2">Confirm Password</label>
-              <div className="relative">
-                <Lock size={18} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" />
-                <input
-                  type={showConfirmPassword ? 'text' : 'password'}
-                  value={formData.confirmPassword}
-                  onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                  placeholder="Confirm your password"
-                  className="input-field pl-10 pr-10"
-                  required
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-300"
-                >
-                  {showConfirmPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
-              </div>
-            </div>
-
-            {/* Terms */}
-            <label className="flex items-start gap-2 cursor-pointer">
-              <input type="checkbox" className="w-4 h-4 rounded accent-green-500 mt-1" required />
-              <span className="text-xs text-gray-400">
-                I agree to the Terms of Service and Privacy Policy
-              </span>
+            {/* Remember Me */}
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" className="w-4 h-4 rounded accent-green-500" disabled={loading} />
+              <span className="text-sm text-gray-400">Remember me</span>
             </label>
 
             {/* Submit Button */}
@@ -201,7 +163,14 @@ export default function Signup() {
               disabled={loading}
               className="w-full btn btn-primary py-3 font-semibold flex items-center justify-center gap-2 disabled:opacity-50"
             >
-              {loading ? 'Creating account...' : 'Create Account'}
+              {loading ? (
+                <>
+                  <Loader size={20} className="animate-spin" />
+                  Logging in...
+                </>
+              ) : (
+                'Login'
+              )}
             </button>
           </form>
 
@@ -211,38 +180,30 @@ export default function Signup() {
               <div className="w-full border-t border-gray-700"></div>
             </div>
             <div className="relative flex justify-center text-sm">
-              <span className="px-2 bg-secondary text-gray-400">Already have an account?</span>
+              <span className="px-2 bg-secondary text-gray-400">New to DropBoard?</span>
             </div>
           </div>
 
-          {/* Login Link */}
+          {/* Sign Up Link */}
           <p className="text-center text-gray-400">
-            <Link href="/auth/login" className="text-accent hover:text-emerald-400 font-semibold transition">
-              Sign in instead
+            Don't have an account?{' '}
+            <Link href="/auth/signup" className="text-accent hover:text-emerald-400 font-semibold transition">
+              Sign up for free
             </Link>
           </p>
         </div>
 
-        {/* Features */}
-        <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-3">
-          {[
-            'Real-time order tracking',
-            'Profit calculations',
-            'Inventory management',
-            'Supplier integration',
-            'Revenue analytics',
-            'Secure data storage',
-          ].map((feature, idx) => (
-            <div key={idx} className="flex items-center gap-2 text-xs text-gray-400">
-              <Check size={16} className="text-accent flex-shrink-0" />
-              <span>{feature}</span>
-            </div>
-          ))}
+        {/* Demo Credentials */}
+        <div className="mt-6 bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
+          <p className="text-sm text-blue-400 font-semibold mb-2">💡 Multi-Device Login</p>
+          <p className="text-xs text-gray-400">
+            Your account works on any browser, any device, anytime!
+          </p>
         </div>
 
         {/* Footer */}
         <p className="text-center text-xs text-gray-500 mt-6">
-          Your data is encrypted and secure
+          Protected by encryption and secure authentication
         </p>
       </div>
     </div>
