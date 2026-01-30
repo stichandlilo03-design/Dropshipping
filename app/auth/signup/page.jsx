@@ -1,12 +1,10 @@
-
 'use client';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Mail, Lock, Store, Eye, EyeOff, AlertCircle, Check } from 'lucide-react';
-import { db } from '@/lib/database';
-import { hashPassword, saveUser, generateToken } from '@/lib/auth';
+import { registerUser } from '@/lib/firebase';
 
 export default function Signup() {
   const router = useRouter();
@@ -38,13 +36,6 @@ export default function Signup() {
       setError('Passwords do not match');
       return false;
     }
-
-    const existingUser = db.getUserByEmail(formData.email);
-    if (existingUser) {
-      setError('Email already registered');
-      return false;
-    }
-
     return true;
   };
 
@@ -59,24 +50,33 @@ export default function Signup() {
         return;
       }
 
-      const hashedPassword = hashPassword(formData.password);
-      const user = db.addUser({
+      // Register with Firebase
+      const result = await registerUser(
+        formData.email,
+        formData.password,
+        formData.storeName
+      );
+
+      if (!result.success) {
+        setError(result.error || 'Registration failed');
+        setLoading(false);
+        return;
+      }
+
+      // Store user info in localStorage for immediate access
+      localStorage.setItem('user', JSON.stringify({
+        id: result.user.uid,
+        email: result.user.email,
         storeName: formData.storeName,
-        email: formData.email,
-        password: hashedPassword,
-      });
+      }));
 
-      const token = generateToken(user.id, user.email);
-      saveUser({
-        id: user.id,
-        email: user.email,
-        storeName: user.storeName,
-        token,
-      });
+      localStorage.setItem('token', 'firebase_' + result.user.uid);
 
+      // Redirect to dashboard
       router.push('/');
     } catch (err) {
       setError('Signup failed. Please try again.');
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -248,4 +248,3 @@ export default function Signup() {
     </div>
   );
 }
-
