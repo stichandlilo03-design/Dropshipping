@@ -40,34 +40,53 @@ export default function Login() {
         return;
       }
 
-      // Get user data from Firestore
+      // Get latest user data from Firestore (so we get updated store name)
       try {
         const { db } = await import('@/lib/firebase');
-        const userDoc = await getDoc(doc(db, 'users', result.user.uid));
+        const userDocRef = doc(db, 'users', result.user.uid);
+        const userDocSnap = await getDoc(userDocRef);
         
-        if (userDoc.exists()) {
-          const userData = userDoc.data();
-          
-          // Generate token
-          const token = generateToken(result.user.uid, result.user.email);
+        let userData = {
+          id: result.user.uid,
+          email: result.user.email,
+          storeName: 'My Store',
+        };
 
-          // Save to localStorage
-          saveUser({
+        if (userDocSnap.exists()) {
+          const firestoreData = userDocSnap.data();
+          userData = {
             id: result.user.uid,
             email: result.user.email,
-            storeName: userData.storeName || 'My Store',
-            token: token,
-          });
+            storeName: firestoreData.storeName || result.user.email.split('@')[0],
+          };
+
+          // Also save settings from Firestore to localStorage if they exist
+          if (firestoreData.settings) {
+            localStorage.setItem('settings', JSON.stringify(firestoreData.settings));
+          }
         }
+
+        // Generate token
+        const token = generateToken(userData.id, userData.email);
+
+        // Save to localStorage
+        saveUser({
+          id: userData.id,
+          email: userData.email,
+          storeName: userData.storeName,
+          token: token,
+        });
+
+        console.log('✅ Logged in as:', userData.storeName);
       } catch (firestoreError) {
-        console.log('Could not fetch user data, but login successful');
+        console.log('Could not fetch user data from Firestore, using defaults');
         
-        // Still save user even if Firestore fetch fails
+        // Fallback - still save user even if Firestore fetch fails
         const token = generateToken(result.user.uid, result.user.email);
         saveUser({
           id: result.user.uid,
           email: result.user.email,
-          storeName: 'My Store',
+          storeName: result.user.email.split('@')[0] || 'My Store',
           token: token,
         });
       }
