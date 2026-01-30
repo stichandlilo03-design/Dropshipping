@@ -1,0 +1,27 @@
+@import 'tailwindcss/base';
+@import 'tailwindcss/components';
+@import 'tailwindcss/utilities';
+
+@layer base {
+  body {
+    @apply bg-primary text-gray-100;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-secondary border border-gray-700 rounded-lg p-6;
+  }
+  
+  .btn {
+    @apply px-4 py-2 rounded-lg font-semibold transition-all;
+  }
+  
+  .btn-primary {
+    @apply btn bg-accent text-white hover:bg-emerald-600;
+  }
+  
+  .input-field {
+    @apply w-full bg-gray-800 border border-gray-600 rounded-lg px-4 py-2 text-white;
+  }
+}
