@@ -6,18 +6,31 @@ import Link from 'next/link';
 import { Save, AlertCircle, Check, ArrowLeft, LogOut, User, Mail } from 'lucide-react';
 import { getUser, getToken, logout } from '@/lib/auth';
 import { db } from '@/lib/database';
-import { FirestoreDB } from '@/lib/firebase';
 
 export default function Settings() {
   const router = useRouter();
   const [user, setUser] = useState(null);
-  const [settings, setSettings] = useState({});
+  const [storeName, setStoreName] = useState('');
+  const [email, setEmail] = useState('');
+  const [currency, setCurrency] = useState('USD');
+  const [timezone, setTimezone] = useState('EST');
   const [showNotification, setShowNotification] = useState(false);
   const [notificationMessage, setNotificationMessage] = useState('');
   const [notificationType, setNotificationType] = useState('success');
   const [activeTab, setActiveTab] = useState('store');
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  // Automation settings
+  const [autoOrderProcessing, setAutoOrderProcessing] = useState(true);
+  const [autoInventoryUpdate, setAutoInventoryUpdate] = useState(true);
+  const [notifyLowStock, setNotifyLowStock] = useState(true);
+  const [lowStockThreshold, setLowStockThreshold] = useState(10);
+
+  // Notification settings
+  const [emailOnOrder, setEmailOnOrder] = useState(true);
+  const [emailOnLowStock, setEmailOnLowStock] = useState(true);
+  const [dailySummary, setDailySummary] = useState(true);
 
   useEffect(() => {
     setMounted(true);
@@ -34,19 +47,24 @@ export default function Settings() {
   }, [router]);
 
   const loadSettings = (currentUser) => {
-    setSettings({
-      storeName: currentUser.storeName || '',
-      email: currentUser.email || '',
-      currency: 'USD',
-      timezone: 'EST',
-      autoOrderProcessing: true,
-      autoInventoryUpdate: true,
-      notifyLowStock: true,
-      lowStockThreshold: 10,
-      emailOnOrder: true,
-      emailOnLowStock: true,
-      dailySummary: true,
-    });
+    // Load from localStorage
+    setStoreName(currentUser.storeName || '');
+    setEmail(currentUser.email || '');
+    
+    // Load other settings if available
+    const savedSettings = localStorage.getItem('settings');
+    if (savedSettings) {
+      const parsed = JSON.parse(savedSettings);
+      setCurrency(parsed.currency || 'USD');
+      setTimezone(parsed.timezone || 'EST');
+      setAutoOrderProcessing(parsed.autoOrderProcessing !== false);
+      setAutoInventoryUpdate(parsed.autoInventoryUpdate !== false);
+      setNotifyLowStock(parsed.notifyLowStock !== false);
+      setLowStockThreshold(parsed.lowStockThreshold || 10);
+      setEmailOnOrder(parsed.emailOnOrder !== false);
+      setEmailOnLowStock(parsed.emailOnLowStock !== false);
+      setDailySummary(parsed.dailySummary !== false);
+    }
   };
 
   const handleSave = async () => {
@@ -54,26 +72,60 @@ export default function Settings() {
     try {
       if (!user) return;
 
-      // Save to Firestore
-      const firestoreDB = new FirestoreDB(user.id);
-      await firestoreDB.saveSettings(settings);
+      // Validation
+      if (!storeName.trim()) {
+        setNotificationMessage('Store name cannot be empty');
+        setNotificationType('error');
+        setShowNotification(true);
+        setTimeout(() => setShowNotification(false), 3000);
+        setLoading(false);
+        return;
+      }
 
-      // Update local user info
+      // Save all settings to localStorage
+      const allSettings = {
+        storeName,
+        email,
+        currency,
+        timezone,
+        autoOrderProcessing,
+        autoInventoryUpdate,
+        notifyLowStock,
+        lowStockThreshold,
+        emailOnOrder,
+        emailOnLowStock,
+        dailySummary,
+      };
+
+      // Save settings object
+      localStorage.setItem('settings', JSON.stringify(allSettings));
+
+      // Update user object with new store name and email
       const updatedUser = {
         ...user,
-        storeName: settings.storeName,
-        email: settings.email,
+        storeName: storeName,
+        email: email,
       };
+
+      // Save updated user to localStorage
       localStorage.setItem('user', JSON.stringify(updatedUser));
+
+      // Update state
       setUser(updatedUser);
 
-      setNotificationMessage('Settings saved successfully!');
+      // Show success message
+      setNotificationMessage('✅ Settings saved successfully! Refreshing...');
       setNotificationType('success');
       setShowNotification(true);
-      setTimeout(() => setShowNotification(false), 3000);
+
+      // Wait 2 seconds then refresh page to show updated store name
+      setTimeout(() => {
+        window.location.reload();
+      }, 2000);
+
     } catch (error) {
       console.error('Error saving settings:', error);
-      setNotificationMessage('Error saving settings. Please try again.');
+      setNotificationMessage('❌ Error saving settings. Please try again.');
       setNotificationType('error');
       setShowNotification(true);
       setTimeout(() => setShowNotification(false), 3000);
@@ -122,7 +174,7 @@ export default function Settings() {
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
         {/* Notification */}
         {showNotification && (
-          <div className={`p-4 rounded-lg flex items-center gap-2 animate-slide-up ${
+          <div className={`p-4 rounded-lg flex items-center gap-2 animate-pulse ${
             notificationType === 'success'
               ? 'bg-green-500/10 border border-green-500/30 text-green-400'
               : 'bg-red-500/10 border border-red-500/30 text-red-400'
@@ -170,12 +222,6 @@ export default function Settings() {
           >
             Notifications
           </button>
-          <button
-            onClick={() => setActiveTab('api')}
-            className={`px-4 py-3 font-semibold transition whitespace-nowrap ${activeTab === 'api' ? 'text-accent border-b-2 border-accent' : 'text-gray-400 hover:text-white'}`}
-          >
-            API Keys
-          </button>
         </div>
 
         {/* Store Information Tab */}
@@ -192,12 +238,12 @@ export default function Settings() {
                   </label>
                   <input
                     type="text"
-                    value={settings.storeName || ''}
-                    onChange={(e) => setSettings({ ...settings, storeName: e.target.value })}
+                    value={storeName}
+                    onChange={(e) => setStoreName(e.target.value)}
                     placeholder="Your store name"
                     className="input-field"
                   />
-                  <p className="text-xs text-gray-500 mt-1">This is how your store appears to customers</p>
+                  <p className="text-xs text-gray-500 mt-1">This is how your store appears in the dashboard</p>
                 </div>
 
                 {/* Email */}
@@ -208,12 +254,12 @@ export default function Settings() {
                   </label>
                   <input
                     type="email"
-                    value={settings.email || ''}
-                    onChange={(e) => setSettings({ ...settings, email: e.target.value })}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
                     placeholder="your@email.com"
                     className="input-field"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Contact email for your account and orders</p>
+                  <p className="text-xs text-gray-500 mt-1">Contact email for your account</p>
                 </div>
 
                 {/* Currency */}
@@ -221,8 +267,8 @@ export default function Settings() {
                   <div>
                     <label className="block text-sm font-semibold text-gray-300 mb-2">Currency</label>
                     <select
-                      value={settings.currency || 'USD'}
-                      onChange={(e) => setSettings({ ...settings, currency: e.target.value })}
+                      value={currency}
+                      onChange={(e) => setCurrency(e.target.value)}
                       className="input-field"
                     >
                       <option>USD ($)</option>
@@ -235,8 +281,8 @@ export default function Settings() {
                   <div>
                     <label className="block text-sm font-semibold text-gray-300 mb-2">Timezone</label>
                     <select
-                      value={settings.timezone || 'EST'}
-                      onChange={(e) => setSettings({ ...settings, timezone: e.target.value })}
+                      value={timezone}
+                      onChange={(e) => setTimezone(e.target.value)}
                       className="input-field"
                     >
                       <option>EST (UTC-5)</option>
@@ -264,8 +310,8 @@ export default function Settings() {
                 <label className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-800/50 transition cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={settings.autoOrderProcessing || false}
-                    onChange={(e) => setSettings({ ...settings, autoOrderProcessing: e.target.checked })}
+                    checked={autoOrderProcessing}
+                    onChange={(e) => setAutoOrderProcessing(e.target.checked)}
                     className="w-4 h-4 rounded accent-green-500 cursor-pointer"
                   />
                   <span className="text-gray-300">Auto-process orders from suppliers</span>
@@ -273,8 +319,8 @@ export default function Settings() {
                 <label className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-800/50 transition cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={settings.autoInventoryUpdate || false}
-                    onChange={(e) => setSettings({ ...settings, autoInventoryUpdate: e.target.checked })}
+                    checked={autoInventoryUpdate}
+                    onChange={(e) => setAutoInventoryUpdate(e.target.checked)}
                     className="w-4 h-4 rounded accent-green-500 cursor-pointer"
                   />
                   <span className="text-gray-300">Automatically update inventory</span>
@@ -282,8 +328,8 @@ export default function Settings() {
                 <label className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-800/50 transition cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={settings.notifyLowStock || false}
-                    onChange={(e) => setSettings({ ...settings, notifyLowStock: e.target.checked })}
+                    checked={notifyLowStock}
+                    onChange={(e) => setNotifyLowStock(e.target.checked)}
                     className="w-4 h-4 rounded accent-green-500 cursor-pointer"
                   />
                   <span className="text-gray-300">Notify when product stock is low</span>
@@ -292,8 +338,8 @@ export default function Settings() {
                   <label className="block text-sm font-semibold text-gray-300 mb-2">Low Stock Threshold</label>
                   <input
                     type="number"
-                    value={settings.lowStockThreshold || 10}
-                    onChange={(e) => setSettings({ ...settings, lowStockThreshold: parseInt(e.target.value) })}
+                    value={lowStockThreshold}
+                    onChange={(e) => setLowStockThreshold(parseInt(e.target.value))}
                     className="input-field"
                     min="1"
                   />
@@ -310,60 +356,33 @@ export default function Settings() {
             <div className="card max-w-2xl">
               <h3 className="text-lg font-bold text-white mb-6">Notification Preferences</h3>
               <div className="space-y-4">
-                {[
-                  { key: 'emailOnOrder', label: 'Email me when new orders arrive' },
-                  { key: 'emailOnLowStock', label: 'Notify me when product inventory is low' },
-                  { key: 'dailySummary', label: 'Send daily sales summary report' },
-                ].map((option) => (
-                  <label key={option.key} className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-800/50 transition cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={settings[option.key] || false}
-                      onChange={(e) => setSettings({ ...settings, [option.key]: e.target.checked })}
-                      className="w-4 h-4 rounded accent-green-500 cursor-pointer"
-                    />
-                    <span className="text-gray-300">{option.label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* API Configuration Tab */}
-        {activeTab === 'api' && (
-          <div className="space-y-6">
-            <div className="card max-w-2xl">
-              <h3 className="text-lg font-bold text-white mb-6">API Configuration</h3>
-              <div className="space-y-4">
-                <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
-                  <p className="text-sm text-gray-400 mb-2">Shopify Store URL</p>
+                <label className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-800/50 transition cursor-pointer">
                   <input
-                    type="text"
-                    placeholder="your-store.myshopify.com"
-                    className="input-field"
+                    type="checkbox"
+                    checked={emailOnOrder}
+                    onChange={(e) => setEmailOnOrder(e.target.checked)}
+                    className="w-4 h-4 rounded accent-green-500 cursor-pointer"
                   />
-                  <p className="text-xs text-gray-500 mt-2">Get this from your Shopify admin URL</p>
-                </div>
-                <div className="bg-gray-800/50 border border-gray-700 rounded-lg p-4">
-                  <p className="text-sm text-gray-400 mb-2">Shopify API Token</p>
+                  <span className="text-gray-300">Email me when new orders arrive</span>
+                </label>
+                <label className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-800/50 transition cursor-pointer">
                   <input
-                    type="password"
-                    placeholder="••••••••••••••••"
-                    className="input-field"
+                    type="checkbox"
+                    checked={emailOnLowStock}
+                    onChange={(e) => setEmailOnLowStock(e.target.checked)}
+                    className="w-4 h-4 rounded accent-green-500 cursor-pointer"
                   />
-                  <p className="text-xs text-gray-500 mt-2">From: Shopify Admin → Settings</p>
-                </div>
-              </div>
-            </div>
-
-            <div className="card bg-blue-500/5 border border-blue-500/30 max-w-2xl">
-              <div className="flex items-start gap-3">
-                <AlertCircle size={20} className="text-blue-400 flex-shrink-0 mt-1" />
-                <div>
-                  <h4 className="text-sm font-bold text-blue-400 mb-2">API Security</h4>
-                  <p className="text-xs text-gray-400">Never share your API keys. Keep them secure and private.</p>
-                </div>
+                  <span className="text-gray-300">Notify me when product inventory is low</span>
+                </label>
+                <label className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-800/50 transition cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={dailySummary}
+                    onChange={(e) => setDailySummary(e.target.checked)}
+                    className="w-4 h-4 rounded accent-green-500 cursor-pointer"
+                  />
+                  <span className="text-gray-300">Send daily sales summary report</span>
+                </label>
               </div>
             </div>
           </div>
@@ -371,7 +390,12 @@ export default function Settings() {
 
         {/* Save Button */}
         <div className="flex gap-3 pt-4 max-w-2xl">
-          <button className="flex-1 btn btn-secondary">Cancel</button>
+          <button 
+            onClick={() => router.push('/')}
+            className="flex-1 btn btn-secondary"
+          >
+            Cancel
+          </button>
           <button 
             onClick={handleSave}
             disabled={loading}
