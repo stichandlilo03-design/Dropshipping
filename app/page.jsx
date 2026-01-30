@@ -1,61 +1,3 @@
-Find this section in your current app/page.jsx:
-
-        {/* Page Header */}
-        <div>
-          <h2 className="text-4xl font-bold text-white mb-2">Welcome back, {user.storeName}!</h2>
-          <p className="text-gray-400">Here's your business overview</p>
-        </div>
-
-REPLACE IT WITH THIS:
-
-        {/* Page Header - PERSONALIZED WELCOME */}
-        <div className="space-y-2 mb-8">
-          <h2 className="text-5xl font-bold text-white">
-            Welcome back to <span className="text-accent">{user.storeName}</span>! 👋
-          </h2>
-          <p className="text-lg text-gray-400">
-            {getWelcomeMessage(user.storeName, analytics.totalOrders)}
-          </p>
-          <div className="flex items-center gap-2 text-sm text-gray-500 mt-4">
-            <span>📧 {user.email}</span>
-            <span className="text-gray-700">•</span>
-            <span>Account ID: {user.id.substring(0, 8)}...</span>
-          </div>
-        </div>
-
-Then ADD THIS FUNCTION before the return statement:
-
-  const getWelcomeMessage = (storeName, totalOrders) => {
-    const hour = new Date().getHours();
-    let timeGreeting = '';
-    
-    if (hour < 12) {
-      timeGreeting = 'Good morning';
-    } else if (hour < 18) {
-      timeGreeting = 'Good afternoon';
-    } else {
-      timeGreeting = 'Good evening';
-    }
-
-    if (totalOrders === 0) {
-      return `${timeGreeting}! Start by adding your first product and order to begin your dropshipping journey.`;
-    } else if (totalOrders < 10) {
-      return `${timeGreeting}! You're building momentum with ${totalOrders} orders. Keep it up! 🚀`;
-    } else if (totalOrders < 50) {
-      return `${timeGreeting}! Great work! ${totalOrders} orders processed. You're on the right track! 💪`;
-    } else if (totalOrders < 100) {
-      return `${timeGreeting}! Amazing! ${totalOrders} orders and counting. You're scaling! 📈`;
-    } else {
-      return `${timeGreeting}! Outstanding! ${totalOrders} orders processed. ${user.storeName} is thriving! 🌟`;
-    }
-  };
-
-================================================================================
-
-COMPLETE UPDATED DASHBOARD CODE:
-
-Replace your entire app/page.jsx with this:
-
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -362,7 +304,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Quick Links - UPDATED */}
+        {/* Quick Links */}
         <div>
           <h3 className="text-2xl font-bold text-white mb-6">Quick Actions</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
