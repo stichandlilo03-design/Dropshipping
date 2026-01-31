@@ -8,61 +8,62 @@ export async function POST(request) {
 
     if (!storeUrl || !accessToken) {
       return NextResponse.json(
-        { error: 'Missing required credentials' },
+        { error: 'Missing Store URL or Access Token' },
         { status: 400 }
       );
     }
 
     // Normalize store URL
     let normalizedUrl = storeUrl.trim();
-    if (!normalizedUrl.endsWith('.myshopify.com')) {
-      normalizedUrl = `${normalizedUrl.replace(/\.myshopify\.com.*/, '')}.myshopify.com`;
+    if (!normalizedUrl.includes('.myshopify.com')) {
+      normalizedUrl = `${normalizedUrl}.myshopify.com`;
     }
+    // Remove protocol if present
+    normalizedUrl = normalizedUrl.replace(/^https?:\/\//, '');
 
-    // Validate with Shopify GraphQL API
+    console.log('Shopify validation:', { normalizedUrl, tokenExists: !!accessToken });
+
+    // Validate with Shopify REST API (more reliable)
     try {
       const response = await fetch(
-        `https://${normalizedUrl}/admin/api/2024-01/graphql.json`,
+        `https://${normalizedUrl}/admin/api/2024-01/shop.json`,
         {
-          method: 'POST',
+          method: 'GET',
           headers: {
             'Content-Type': 'application/json',
             'X-Shopify-Access-Token': accessToken,
           },
-          body: JSON.stringify({
-            query: `
-              query {
-                shop {
-                  id
-                  name
-                  email
-                  plan {
-                    displayName
-                  }
-                }
-              }
-            `,
-          }),
         }
       );
 
+      console.log('Shopify response status:', response.status);
+
       if (!response.ok) {
+        const errorData = await response.text();
+        console.error('Shopify error:', errorData);
+        
+        if (response.status === 401) {
+          return NextResponse.json(
+            { error: 'Invalid access token. Check your token in Shopify Admin → Settings → Apps → Develop apps' },
+            { status: 401 }
+          );
+        }
+        
+        if (response.status === 404) {
+          return NextResponse.json(
+            { error: 'Store not found. Check your store URL (e.g., dropshipwithmonk.myshopify.com)' },
+            { status: 404 }
+          );
+        }
+
         return NextResponse.json(
-          { error: 'Invalid Shopify credentials' },
-          { status: 401 }
+          { error: `Shopify API error: ${response.statusText}` },
+          { status: response.status }
         );
       }
 
       const result = await response.json();
-
-      if (result.errors) {
-        return NextResponse.json(
-          { error: result.errors[0]?.message || 'Invalid access token' },
-          { status: 401 }
-        );
-      }
-
-      const shop = result.data?.shop;
+      const shop = result.shop;
 
       if (!shop) {
         return NextResponse.json(
@@ -77,25 +78,32 @@ export async function POST(request) {
         shopId: shop.id,
         shopName: shop.name,
         shopEmail: shop.email,
-        planName: shop.plan?.displayName,
+        shopCurrency: shop.currency,
+        shopPlan: shop.plan_display_name,
+        createdAt: shop.created_at,
         connectedAt: new Date().toISOString(),
       };
 
+      console.log('Shopify connection successful:', { shopName: shop.name });
+
       return NextResponse.json({
         success: true,
-        message: 'Shopify connected successfully',
+        message: `Successfully connected to ${shop.name}!`,
         credentials,
       });
-    } catch (error) {
-      console.error('Shopify validation error:', error);
+    } catch (apiError) {
+      console.error('Shopify API validation error:', apiError);
       return NextResponse.json(
-        { error: 'Failed to connect to Shopify store' },
+        { 
+          error: `Failed to connect to Shopify: ${apiError.message}. Make sure the store URL is correct (dropshipwithmonk.myshopify.com) and access token is valid.` 
+        },
         { status: 500 }
       );
     }
   } catch (error) {
+    console.error('Validation error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: `Server error: ${error.message}` },
       { status: 500 }
     );
   }
