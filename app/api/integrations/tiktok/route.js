@@ -5,29 +5,19 @@ export async function POST(request) {
     const body = await request.json();
     const { clientKey, clientSecret } = body;
 
-    console.log('[TikTok Validator] Testing Credentials...');
-
     if (!clientKey || !clientSecret) {
       return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Client Key and Client Secret are required' 
-        },
+        { success: false, error: 'Client Key and Secret required' },
         { status: 400 }
       );
     }
 
     if (clientKey.length < 10 || clientSecret.length < 10) {
       return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Invalid credentials format' 
-        },
+        { success: false, error: 'Invalid credentials' },
         { status: 400 }
       );
     }
-
-    console.log('[TikTok Validator] ✅ Credentials format valid!');
 
     return NextResponse.json({
       success: true,
@@ -38,12 +28,8 @@ export async function POST(request) {
     });
 
   } catch (error) {
-    console.error('[TikTok Validator] Error:', error.message);
     return NextResponse.json(
-      { 
-        success: false, 
-        error: `Validation failed: ${error.message}` 
-      },
+      { success: false, error: 'Validation failed' },
       { status: 500 }
     );
   }
