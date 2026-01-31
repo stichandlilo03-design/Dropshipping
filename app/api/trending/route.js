@@ -1,37 +1,23 @@
 import { NextResponse } from 'next/server';
 import { db as firebaseDb } from '@/lib/firebase';
-import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
-import { getAuth } from 'firebase/auth';
+import { collection, getDocs, query } from 'firebase/firestore';
 
 export async function GET(request) {
   try {
-    // Get user ID from Firebase ID token in Authorization header
-    const authHeader = request.headers.get('authorization');
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      console.log('[Trending] ❌ No auth header');
-      return NextResponse.json(
-        { success: false, error: 'Not authenticated', products: [], requiredApis: [] },
-        { status: 401 }
-      );
-    }
-
-    // For API routes, we need to use the token to identify the user
-    // This is a workaround - ideally you'd verify the token on the server
-    // For now, we'll get the userId from a custom header that the client sends
+    // Get user ID from header (sent by client)
     const userId = request.headers.get('x-user-id');
     
     if (!userId) {
-      console.log('[Trending] ❌ No user ID provided');
+      console.log('[Trending API] ❌ No user ID in header');
       return NextResponse.json(
         { success: false, error: 'Not authenticated', products: [], requiredApis: [] },
         { status: 401 }
       );
     }
 
-    console.log('[Trending] 📥 Fetching real trending data for user:', userId);
+    console.log('[Trending API] 📥 Fetching for user:', userId);
 
-    // Get all connected integrations
+    // Get all connected integrations from Firestore
     const integrationsRef = collection(firebaseDb, 'users', userId, 'integrations');
     const integrationsSnapshot = await getDocs(integrationsRef);
     
@@ -45,9 +31,9 @@ export async function GET(request) {
       }
     });
 
-    console.log('[Trending] ✅ Connected APIs:', connectedApis);
+    console.log('[Trending API] ✅ Connected APIs:', connectedApis);
 
-    // Define required APIs for trending
+    // Define which APIs provide trending
     const availableApis = ['printful', 'shopify', 'tiktok'];
     const requiredApis = availableApis.filter(api => !connectedApis.includes(api));
 
@@ -55,34 +41,34 @@ export async function GET(request) {
 
     // Fetch from Printful if connected
     if (integrations.printful) {
-      console.log('[Trending] 🔄 Fetching from Printful...');
+      console.log('[Trending API] 🔄 Fetching from Printful...');
       try {
         const printfulProducts = await fetchPrintfulTrending(integrations.printful);
         allProducts = allProducts.concat(printfulProducts);
-        console.log('[Trending] ✅ Got', printfulProducts.length, 'from Printful');
+        console.log('[Trending API] ✅ Got', printfulProducts.length, 'from Printful');
       } catch (error) {
-        console.error('[Trending] ❌ Printful error:', error.message);
+        console.error('[Trending API] ❌ Printful error:', error.message);
       }
     }
 
     // Fetch from Shopify if connected
     if (integrations.shopify) {
-      console.log('[Trending] 🔄 Fetching from Shopify...');
+      console.log('[Trending API] 🔄 Fetching from Shopify...');
       try {
         const shopifyProducts = await fetchShopifyTrending(integrations.shopify);
         allProducts = allProducts.concat(shopifyProducts);
-        console.log('[Trending] ✅ Got', shopifyProducts.length, 'from Shopify');
+        console.log('[Trending API] ✅ Got', shopifyProducts.length, 'from Shopify');
       } catch (error) {
-        console.error('[Trending] ❌ Shopify error:', error.message);
+        console.error('[Trending API] ❌ Shopify error:', error.message);
       }
     }
 
-    // TikTok requires special OAuth - show as needed
-    if (!integrations.tiktok && 'tiktok' in requiredApis) {
-      console.log('[Trending] ⚠️ TikTok not connected');
+    // TikTok requires special OAuth
+    if (!integrations.tiktok && requiredApis.includes('tiktok')) {
+      console.log('[Trending API] ⚠️ TikTok not connected');
     }
 
-    console.log('[Trending] ✅ Total products:', allProducts.length);
+    console.log('[Trending API] ✅ Total products:', allProducts.length);
 
     return NextResponse.json({
       success: true,
@@ -95,7 +81,7 @@ export async function GET(request) {
     });
 
   } catch (error) {
-    console.error('[Trending] ❌ Error:', error.message);
+    console.error('[Trending API] ❌ Error:', error.message);
     return NextResponse.json(
       { success: false, error: error.message, products: [], requiredApis: [] },
       { status: 500 }
@@ -112,30 +98,35 @@ async function fetchPrintfulTrending(printfulIntegration) {
     throw new Error('No Printful API token');
   }
 
-  const response = await fetch('https://api.v2.printful.com/products', {
-    method: 'GET',
-    headers: {
-      'Authorization': `Bearer ${apiToken}`,
-      'Content-Type': 'application/json',
-    },
-  });
+  try {
+    const response = await fetch('https://api.v2.printful.com/products', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
 
-  if (!response.ok) {
-    throw new Error(`Printful API returned ${response.status}`);
+    if (!response.ok) {
+      throw new Error(`Printful API returned ${response.status}`);
+    }
+
+    const data = await response.json();
+    
+    // Return real Printful products (top 10)
+    return (data.result || []).slice(0, 10).map(product => ({
+      id: `printful_${product.id}`,
+      title: product.title,
+      type: product.type_name,
+      image: product.image,
+      supplier: 'Printful',
+      category: product.main_category_id,
+      url: `https://www.printful.com/products/${product.id}`,
+    }));
+  } catch (err) {
+    console.error('Printful fetch error:', err);
+    return [];
   }
-
-  const data = await response.json();
-  
-  // Return real Printful products (top products)
-  return (data.result || []).slice(0, 10).map(product => ({
-    id: `printful_${product.id}`,
-    title: product.title,
-    type: product.type_name,
-    image: product.image,
-    supplier: 'Printful',
-    category: product.main_category_id,
-    url: `https://www.printful.com/products/${product.id}`,
-  }));
 }
 
 // Fetch real Shopify trending products
@@ -148,64 +139,69 @@ async function fetchShopifyTrending(shopifyIntegration) {
     throw new Error('No Shopify credentials');
   }
 
-  // GraphQL query to get products (most recently added or best sellers)
-  const query = `
-    {
-      products(first: 10, sortKey: CREATED, reverse: true) {
-        edges {
-          node {
-            id
-            title
-            description
-            featuredImage {
-              url
-            }
-            priceRange {
-              minVariantPrice {
-                amount
-                currencyCode
+  try {
+    // GraphQL query to get most recent products
+    const query = `
+      {
+        products(first: 10, sortKey: CREATED, reverse: true) {
+          edges {
+            node {
+              id
+              title
+              description
+              featuredImage {
+                url
+              }
+              priceRange {
+                minVariantPrice {
+                  amount
+                  currencyCode
+                }
               }
             }
           }
         }
       }
+    `;
+
+    const response = await fetch(
+      `https://${storeUrl}/admin/api/2024-01/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query }),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify API returned ${response.status}`);
     }
-  `;
 
-  const response = await fetch(
-    `https://${storeUrl}/admin/api/2024-01/graphql.json`,
-    {
-      method: 'POST',
-      headers: {
-        'X-Shopify-Access-Token': accessToken,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ query }),
+    const data = await response.json();
+
+    if (data.errors) {
+      throw new Error(`Shopify error: ${data.errors[0].message}`);
     }
-  );
 
-  if (!response.ok) {
-    throw new Error(`Shopify API returned ${response.status}`);
+    // Return real Shopify products
+    return (data.data?.products?.edges || []).map(edge => {
+      const product = edge.node;
+      return {
+        id: `shopify_${product.id}`,
+        title: product.title,
+        description: product.description?.substring(0, 100),
+        image: product.featuredImage?.url,
+        price: product.priceRange?.minVariantPrice?.amount,
+        currency: product.priceRange?.minVariantPrice?.currencyCode,
+        supplier: 'Shopify',
+        url: `https://${credentials.storeUrl}/products/${product.title.toLowerCase().replace(/\s+/g, '-')}`,
+      };
+    });
+  } catch (err) {
+    console.error('Shopify fetch error:', err);
+    return [];
   }
-
-  const data = await response.json();
-
-  if (data.errors) {
-    throw new Error(`Shopify error: ${data.errors[0].message}`);
-  }
-
-  // Return real Shopify products
-  return (data.data?.products?.edges || []).map(edge => {
-    const product = edge.node;
-    return {
-      id: `shopify_${product.id}`,
-      title: product.title,
-      description: product.description?.substring(0, 100),
-      image: product.featuredImage?.url,
-      price: product.priceRange?.minVariantPrice?.amount,
-      currency: product.priceRange?.minVariantPrice?.currencyCode,
-      supplier: 'Shopify',
-      url: `https://${credentials.storeUrl}/products/${product.title.toLowerCase().replace(/\s+/g, '-')}`,
-    };
-  });
 }
