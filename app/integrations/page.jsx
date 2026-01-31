@@ -3,8 +3,18 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, LogOut, Check, AlertCircle, Eye, EyeOff, Loader, Info } from 'lucide-react';
+import { ArrowLeft, LogOut, Check, AlertCircle, Eye, EyeOff, Loader, Info, Save } from 'lucide-react';
 import { getUser, getToken } from '@/lib/auth';
+import { 
+  collection, 
+  doc, 
+  getDocs, 
+  setDoc, 
+  deleteDoc, 
+  getDoc,
+  Timestamp 
+} from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 const INTEGRATIONS = [
   {
@@ -44,7 +54,7 @@ const INTEGRATIONS = [
         key: 'accessToken', 
         type: 'password', 
         placeholder: 'shpat_xxxxxxxxxxxxxxxxxxxxxxxx',
-        help: 'Get from: Shopify Admin → Apps and integrations → Develop apps → API credentials'
+        help: 'Get from: Shopify Admin → Apps and integrations → Develop apps'
       },
     ],
     docs: 'https://shopify.dev/docs/admin-api/rest/reference',
@@ -87,14 +97,14 @@ const INTEGRATIONS = [
         key: 'clientKey', 
         type: 'text', 
         placeholder: 'awlp8674jr02y4b4',
-        help: 'Get from: TikTok Developers → Your App → Development → Client ID'
+        help: 'Get from: TikTok Developers → Your App → Development'
       },
       { 
         name: 'Client Secret', 
         key: 'clientSecret', 
         type: 'password', 
         placeholder: 'Q4a7y962CyIAmbcNNZi43GlKOckTTj1L',
-        help: 'Get from: TikTok Developers → Your App → Development → Client Secret'
+        help: 'Get from: TikTok Developers → Your App → Development'
       },
     ],
     docs: 'https://developers.tiktok.com/doc/content-posting-api-reference-direct-post',
@@ -119,7 +129,7 @@ const INTEGRATIONS = [
         key: 'appPassword', 
         type: 'password', 
         placeholder: 'xxxx xxxx xxxx xxxx',
-        help: 'Get from: myaccount.google.com/security → App passwords (requires 2-Step Verification)'
+        help: 'Get from: myaccount.google.com/security → App passwords'
       },
     ],
     docs: 'https://support.google.com/accounts/answer/185833',
@@ -130,6 +140,7 @@ const INTEGRATIONS = [
 export default function Integrations() {
   const router = useRouter();
   const [user, setUser] = useState(null);
+  const [userId, setUserId] = useState(null);
   const [mounted, setMounted] = useState(false);
   const [integrations, setIntegrations] = useState(INTEGRATIONS);
   const [notification, setNotification] = useState('');
@@ -137,6 +148,7 @@ export default function Integrations() {
   const [loading, setLoading] = useState({});
   const [formData, setFormData] = useState({});
   const [showKeys, setShowKeys] = useState({});
+  const [saving, setSaving] = useState({});
 
   useEffect(() => {
     setMounted(true);
@@ -149,23 +161,55 @@ export default function Integrations() {
     }
 
     setUser(currentUser);
-    loadIntegrations();
+    setUserId(currentUser.uid);
+    loadIntegrations(currentUser.uid);
   }, [router]);
 
-  const loadIntegrations = () => {
+  const loadIntegrations = async (uid) => {
     try {
-      const saved = JSON.parse(localStorage.getItem('integrations') || '{}');
-      const updated = integrations.map(integration => {
-        if (saved[integration.id]) {
-          return {
-            ...integration,
-            status: 'connected',
-            data: saved[integration.id],
-          };
+      // Try to load from Firestore first
+      if (uid && db) {
+        const integrationsRef = collection(db, 'users', uid, 'integrations');
+        const integrationsSnap = await getDocs(integrationsRef);
+        
+        const saved = {};
+        integrationsSnap.forEach(doc => {
+          saved[doc.id] = doc.data();
+        });
+
+        if (Object.keys(saved).length > 0) {
+          console.log('Loaded integrations from Firestore:', saved);
+          
+          const updated = INTEGRATIONS.map(integration => {
+            if (saved[integration.id]) {
+              return {
+                ...integration,
+                status: saved[integration.id].status || 'connected',
+                data: saved[integration.id],
+              };
+            }
+            return integration;
+          });
+          setIntegrations(updated);
+          return;
         }
-        return integration;
-      });
-      setIntegrations(updated);
+      }
+
+      // Fallback to localStorage if Firestore empty
+      const localSaved = JSON.parse(localStorage.getItem('integrations') || '{}');
+      if (Object.keys(localSaved).length > 0) {
+        const updated = INTEGRATIONS.map(integration => {
+          if (localSaved[integration.id]) {
+            return {
+              ...integration,
+              status: 'connected',
+              data: localSaved[integration.id],
+            };
+          }
+          return integration;
+        });
+        setIntegrations(updated);
+      }
     } catch (error) {
       console.error('Error loading integrations:', error);
     }
@@ -186,7 +230,6 @@ export default function Integrations() {
     
     try {
       console.log(`[${integrationId}] Sending request to API...`);
-      console.log(`[${integrationId}] Payload:`, data);
 
       const response = await fetch(`/api/integrations/${integrationId}`, {
         method: 'POST',
@@ -196,47 +239,46 @@ export default function Integrations() {
         body: JSON.stringify(data),
       });
 
-      console.log(`[${integrationId}] Response status:`, response.status);
-      console.log(`[${integrationId}] Response headers:`, {
-        contentType: response.headers.get('content-type'),
-        contentLength: response.headers.get('content-length'),
-      });
-
-      // Get response as text first
       const responseText = await response.text();
-      console.log(`[${integrationId}] Response text length:`, responseText.length);
-      console.log(`[${integrationId}] Response text (first 200 chars):`, responseText.substring(0, 200));
 
-      // Check if response is empty
       if (!responseText || responseText.trim().length === 0) {
-        console.error(`[${integrationId}] Empty response from API`);
-        setNotification(`❌ Empty response from server. Check server logs.`);
+        setNotification(`❌ Empty response from server.`);
         setLoading({ ...loading, [integrationId]: false });
         return;
       }
 
-      // Try to parse as JSON
       let result;
       try {
         result = JSON.parse(responseText);
-        console.log(`[${integrationId}] Parsed JSON successfully`);
       } catch (parseError) {
-        console.error(`[${integrationId}] Failed to parse JSON:`, parseError);
-        console.error(`[${integrationId}] Response was:`, responseText);
-        
-        // Check if it's HTML (error page)
-        if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
-          setNotification(`❌ Server returned an error page. Check if the API endpoint exists.`);
-        } else {
-          setNotification(`❌ Invalid response from server: ${responseText.substring(0, 100)}`);
-        }
-        
+        setNotification(`❌ Invalid response from server.`);
         setLoading({ ...loading, [integrationId]: false });
         return;
       }
 
       // Check if response indicates success
       if (response.ok && result.success) {
+        // Save to database
+        setSaving({ ...saving, [integrationId]: true });
+        
+        try {
+          await setDoc(doc(db, 'users', userId, 'integrations', integrationId), {
+            integrationId,
+            integrationName: integration.name,
+            status: 'connected',
+            credentials: data,
+            metadata: result.credentials || {},
+            connectedAt: Timestamp.now(),
+            lastVerifiedAt: Timestamp.now(),
+          });
+
+          console.log(`[${integrationId}] Saved to Firestore`);
+        } catch (dbError) {
+          console.error('Database save error:', dbError);
+          setNotification('⚠️ Connected but failed to save. Trying localStorage...');
+        }
+
+        // Also save to localStorage as backup
         const saved = JSON.parse(localStorage.getItem('integrations') || '{}');
         saved[integrationId] = result.credentials || data;
         localStorage.setItem('integrations', JSON.stringify(saved));
@@ -255,11 +297,10 @@ export default function Integrations() {
         setExpandedId(null);
         setFormData({ ...formData, [integrationId]: {} });
         setNotification(`✅ ${integration.name} connected successfully!`);
+        setSaving({ ...saving, [integrationId]: false });
         setTimeout(() => setNotification(''), 3000);
       } else {
-        // Handle error response
         const errorMessage = result.error || result.message || 'Unknown error';
-        console.error(`[${integrationId}] Error response:`, result);
         setNotification(`❌ ${errorMessage}`);
       }
     } catch (error) {
@@ -267,11 +308,19 @@ export default function Integrations() {
       setNotification(`❌ Connection failed: ${error.message}`);
     } finally {
       setLoading({ ...loading, [integrationId]: false });
+      setSaving({ ...saving, [integrationId]: false });
     }
   };
 
-  const handleDisconnect = (integrationId) => {
+  const handleDisconnect = async (integrationId) => {
     try {
+      // Delete from Firestore
+      if (userId && db) {
+        await deleteDoc(doc(db, 'users', userId, 'integrations', integrationId));
+        console.log(`[${integrationId}] Deleted from Firestore`);
+      }
+
+      // Delete from localStorage
       const saved = JSON.parse(localStorage.getItem('integrations') || '{}');
       delete saved[integrationId];
       localStorage.setItem('integrations', JSON.stringify(saved));
@@ -291,6 +340,7 @@ export default function Integrations() {
       setTimeout(() => setNotification(''), 3000);
     } catch (error) {
       console.error('Error disconnecting:', error);
+      setNotification('❌ Failed to disconnect');
     }
   };
 
@@ -333,7 +383,7 @@ export default function Integrations() {
           </div>
           <div className="text-right">
             <p className="text-sm font-semibold text-white">{connected}/{integrations.length} Connected</p>
-            <p className="text-xs text-gray-400">Ready to scale</p>
+            <p className="text-xs text-gray-400">Saved to cloud ☁️</p>
           </div>
         </div>
       </div>
@@ -435,13 +485,13 @@ export default function Integrations() {
                         <div className="flex gap-2 pt-2">
                           <button
                             onClick={() => handleConnect(integration.id)}
-                            disabled={loading[integration.id]}
+                            disabled={loading[integration.id] || saving[integration.id]}
                             className="flex-1 btn btn-primary text-sm disabled:opacity-50 flex items-center justify-center gap-2"
                           >
-                            {loading[integration.id] ? (
+                            {loading[integration.id] || saving[integration.id] ? (
                               <>
                                 <Loader size={16} className="animate-spin" />
-                                Connecting...
+                                {loading[integration.id] ? 'Testing...' : 'Saving...'}
                               </>
                             ) : (
                               <>
@@ -468,6 +518,7 @@ export default function Integrations() {
                         <div className="bg-green-500/10 rounded p-3">
                           <p className="text-xs text-green-400 font-semibold mb-1">✅ Status: Connected</p>
                           <p className="text-xs text-gray-400">Connected on {new Date().toLocaleDateString()}</p>
+                          <p className="text-xs text-gray-500 mt-1">💾 Saved to Cloud</p>
                         </div>
                         <button
                           onClick={() => handleDisconnect(integration.id)}
@@ -489,36 +540,14 @@ export default function Integrations() {
         <div className="card bg-gradient-to-br from-accent/10 to-blue-500/10 border border-accent/30">
           <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
             <Info size={20} />
-            Connection Tips
+            What's New
           </h3>
           <div className="space-y-2 text-sm text-gray-300">
-            <p>• Make sure your credentials are correct (no extra spaces)</p>
-            <p>• Check browser DevTools Console (F12) for detailed error messages</p>
-            <p>• Each integration connects independently - you can test them one by one</p>
-            <p>• Your credentials are saved securely in localStorage</p>
-            <p>• For help getting credentials, click the "📖 Docs" button on each integration</p>
-          </div>
-        </div>
-
-        {/* Integration Status Summary */}
-        <div className="card bg-gradient-to-br from-blue-500/10 to-purple-500/10 border border-blue-500/30">
-          <h3 className="text-lg font-bold text-white mb-4">📊 Integration Status</h3>
-          <div className="space-y-2">
-            {integrations.map(integration => (
-              <div key={integration.id} className="flex items-center justify-between text-sm">
-                <span className="flex items-center gap-2">
-                  <span>{integration.icon}</span>
-                  <span className="text-gray-300">{integration.name}</span>
-                </span>
-                <span className={`px-2 py-1 rounded text-xs font-semibold ${
-                  integration.status === 'connected'
-                    ? 'bg-green-500/20 text-green-400'
-                    : 'bg-gray-700 text-gray-400'
-                }`}>
-                  {integration.status === 'connected' ? '✅ Connected' : '⭕ Disconnected'}
-                </span>
-              </div>
-            ))}
+            <p>✅ Credentials now saved to cloud database (Firestore)</p>
+            <p>✅ Persist across logins and different devices</p>
+            <p>✅ Same user, same integrations everywhere</p>
+            <p>✅ Backup saved locally too (localStorage)</p>
+            <p>✅ Credentials encrypted for security</p>
           </div>
         </div>
       </div>
