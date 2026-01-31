@@ -2,119 +2,113 @@ import { NextResponse } from 'next/server';
 
 export async function POST(request) {
   try {
-    const data = await request.json();
-    const { storeUrl, accessToken } = data;
+    const { storeUrl, accessToken } = await request.json();
 
-    console.log('Shopify validation request received');
+    console.log('[Shopify Validator] Testing Store URL and Access Token...');
 
     if (!storeUrl || !accessToken) {
+      console.error('[Shopify Validator] ❌ Missing required fields');
       return NextResponse.json(
-        { error: 'Missing Store URL or Access Token' },
+        { 
+          success: false, 
+          error: 'Store URL and Access Token are required' 
+        },
         { status: 400 }
       );
     }
 
-    // Normalize store URL (remove https://, ensure .myshopify.com)
-    let normalizedUrl = storeUrl.toLowerCase().trim();
-    if (normalizedUrl.includes('https://')) {
-      normalizedUrl = normalizedUrl.replace('https://', '');
-    }
-    if (normalizedUrl.includes('http://')) {
-      normalizedUrl = normalizedUrl.replace('http://', '');
-    }
-    if (!normalizedUrl.includes('.myshopify.com')) {
-      normalizedUrl = normalizedUrl.replace('.myshopify.com', '');
-      normalizedUrl += '.myshopify.com';
-    }
+    // Normalize store URL
+    const normalizedUrl = storeUrl.includes('myshopify.com') 
+      ? storeUrl 
+      : `${storeUrl}.myshopify.com`;
 
-    console.log('Calling Shopify API:', normalizedUrl);
+    console.log('[Shopify Validator] Testing with store:', normalizedUrl);
 
-    const response = await fetch(`https://${normalizedUrl}/admin/api/2024-01/shop.json`, {
-      method: 'GET',
-      headers: {
-        'X-Shopify-Access-Token': accessToken,
-        'Content-Type': 'application/json',
-      },
-    });
+    // Test Shopify API
+    const response = await fetch(
+      `https://${normalizedUrl}/admin/api/2024-01/shop.json`,
+      {
+        method: 'GET',
+        headers: {
+          'X-Shopify-Access-Token': accessToken,
+          'Content-Type': 'application/json',
+        },
+      }
+    );
 
-    console.log('Response status:', response.status);
-
-    const responseText = await response.text();
-
-    if (!responseText || responseText.trim().length === 0) {
-      return NextResponse.json(
-        { error: 'Empty response from Shopify. Check your credentials.' },
-        { status: 401 }
-      );
-    }
-
-    let result;
-    try {
-      result = JSON.parse(responseText);
-    } catch (e) {
-      console.error('Parse error:', e);
-      return NextResponse.json(
-        { error: 'Invalid response from Shopify' },
-        { status: 500 }
-      );
-    }
+    const responseData = await response.text();
+    console.log('[Shopify Validator] Response status:', response.status);
 
     if (!response.ok) {
-      console.error('Shopify error:', result);
+      console.error('[Shopify Validator] ❌ API validation failed:', responseData.substring(0, 200));
       
-      let errorMsg = 'Authentication failed';
-      if (result.errors) {
-        errorMsg = Object.values(result.errors).flat().join(', ');
-      } else if (result.message) {
-        errorMsg = result.message;
+      if (response.status === 401 || response.status === 403) {
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: 'Invalid Access Token or Store URL. Please check your Shopify credentials.' 
+          },
+          { status: 401 }
+        );
+      }
+
+      if (response.status === 404) {
+        return NextResponse.json(
+          { 
+            success: false, 
+            error: 'Store not found. Please check your Store URL.' 
+          },
+          { status: 404 }
+        );
       }
 
       return NextResponse.json(
-        { error: `Shopify Error: ${errorMsg}` },
+        { 
+          success: false, 
+          error: `Shopify API error: ${response.status}` 
+        },
         { status: response.status }
       );
     }
 
-    if (!result.shop) {
+    let shopData;
+    try {
+      shopData = JSON.parse(responseData);
+    } catch (e) {
+      console.error('[Shopify Validator] ❌ Failed to parse response');
       return NextResponse.json(
-        { error: 'No shop data returned' },
-        { status: 400 }
+        { 
+          success: false, 
+          error: 'Invalid response from Shopify' 
+        },
+        { status: 500 }
       );
     }
 
-    const shop = result.shop;
-    console.log('✅ Shop found:', shop.name);
+    console.log('[Shopify Validator] ✅ Credentials are valid!');
+    console.log('[Shopify Validator] Shop name:', shopData.shop?.name);
 
+    // Return success with shop info
     return NextResponse.json({
       success: true,
-      message: `✅ Successfully connected to Shopify store: ${shop.name}!`,
       credentials: {
-        storeName: shop.name,
+        provider: 'Shopify',
+        shopName: shopData.shop?.name || 'Unknown',
         storeUrl: normalizedUrl,
-        shopId: shop.id,
-        email: shop.email,
-        country: shop.country_code,
-        currency: shop.currency,
-        connectedAt: new Date().toISOString(),
+        status: 'active',
+        apiVersion: '2024-01',
+        testedAt: new Date().toISOString(),
       },
     });
 
   } catch (error) {
-    console.error('Fatal error:', error);
+    console.error('[Shopify Validator] ❌ Error:', error.message);
     return NextResponse.json(
-      { error: `Server error: ${error.message}` },
+      { 
+        success: false, 
+        error: `Validation failed: ${error.message}` 
+      },
       { status: 500 }
     );
   }
-}
-
-export async function OPTIONS(request) {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    },
-  });
 }
