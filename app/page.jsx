@@ -30,67 +30,110 @@ export default function Dashboard() {
     const currentUser = getUser();
     const token = getToken();
 
+    console.log('Current user:', currentUser);
+
     if (!currentUser || !token) {
       router.push('/auth/login');
       return;
     }
 
     setUser(currentUser);
-    loadData(currentUser.uid);
+
+    // Get userId from different possible properties
+    const userId = currentUser.uid || currentUser.id || currentUser.userId;
+    
+    console.log('User ID:', userId);
+
+    if (!userId) {
+      console.error('No valid user ID found');
+      setLoading(false);
+      return;
+    }
+
+    loadData(userId);
   }, [router]);
 
   const loadData = async (userId) => {
     try {
       setLoading(true);
+      console.log('Loading data for user:', userId);
+
+      // Validate userId is a string and not undefined
+      if (!userId || typeof userId !== 'string') {
+        console.error('Invalid userId:', userId);
+        setLoading(false);
+        return;
+      }
 
       // Load orders from Firestore
-      const ordersQuery = query(
-        collection(firebaseDb, 'orders'),
-        where('userId', '==', userId)
-      );
-      const ordersSnap = await getDocs(ordersQuery);
-      const ordersData = ordersSnap.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+      try {
+        const ordersQuery = query(
+          collection(firebaseDb, 'orders'),
+          where('userId', '==', userId)
+        );
+        const ordersSnap = await getDocs(ordersQuery);
+        const ordersData = ordersSnap.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        console.log('Orders loaded:', ordersData.length);
+        setOrders(ordersData);
+      } catch (ordersError) {
+        console.error('Error loading orders:', ordersError);
+        setOrders([]);
+      }
 
       // Load products from Firestore
-      const productsQuery = query(
-        collection(firebaseDb, 'products'),
-        where('userId', '==', userId)
-      );
-      const productsSnap = await getDocs(productsQuery);
-      const productsData = productsSnap.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-      }));
+      try {
+        const productsQuery = query(
+          collection(firebaseDb, 'products'),
+          where('userId', '==', userId)
+        );
+        const productsSnap = await getDocs(productsQuery);
+        const productsData = productsSnap.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        console.log('Products loaded:', productsData.length);
+        setProducts(productsData);
+      } catch (productsError) {
+        console.error('Error loading products:', productsError);
+        setProducts([]);
+      }
 
       // Load integrations from Firestore
-      const integrationsData = {};
-      const integrationsQuery = query(
-        collection(firebaseDb, 'users', userId, 'integrations')
-      );
-      const integrationsSnap = await getDocs(integrationsQuery);
-      integrationsSnap.forEach(doc => {
-        integrationsData[doc.id] = doc.data();
-      });
+      try {
+        const integrationsData = {};
+        const integrationsCollection = collection(firebaseDb, 'users', userId, 'integrations');
+        const integrationsSnap = await getDocs(integrationsCollection);
+        integrationsSnap.forEach(doc => {
+          integrationsData[doc.id] = doc.data();
+        });
+        console.log('Integrations loaded:', Object.keys(integrationsData).length);
+        setIntegrations(integrationsData);
+      } catch (integrationsError) {
+        console.error('Error loading integrations:', integrationsError);
+        setIntegrations({});
+      }
 
-      setOrders(ordersData);
-      setProducts(productsData);
-      setIntegrations(integrationsData);
-
-      // Calculate statistics
-      calculateStats(ordersData, productsData);
+      // Calculate stats will be done after data is loaded
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('Fatal error loading data:', error);
     } finally {
       setLoading(false);
     }
   };
 
+  // Calculate stats when orders/products change
+  useEffect(() => {
+    if (!loading) {
+      calculateStats(orders, products);
+    }
+  }, [orders, products, loading]);
+
   const calculateStats = (ordersData, productsData) => {
-    const totalRevenue = ordersData.reduce((sum, order) => sum + (order.total || 0), 0);
-    const totalCost = ordersData.reduce((sum, order) => sum + (order.cost || 0), 0);
+    const totalRevenue = ordersData.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0);
+    const totalCost = ordersData.reduce((sum, order) => sum + (parseFloat(order.cost) || 0), 0);
     const totalProfit = totalRevenue - totalCost;
     const profitMargin = totalRevenue > 0 ? Math.round((totalProfit / totalRevenue) * 100) : 0;
     const avgOrderValue = ordersData.length > 0 ? (totalRevenue / ordersData.length).toFixed(2) : 0;
@@ -115,14 +158,13 @@ export default function Dashboard() {
     if (user) {
       const data = {
         user: {
-          storeName: user.displayName || 'My Store',
           email: user.email,
           exportedAt: new Date().toISOString(),
         },
         stats,
-        orders,
-        products,
-        integrations: Object.keys(integrations),
+        ordersCount: orders.length,
+        productsCount: products.length,
+        integrationsConnected: Object.keys(integrations),
       };
 
       const dataStr = JSON.stringify(data, null, 2);
@@ -130,7 +172,7 @@ export default function Dashboard() {
       const url = URL.createObjectURL(dataBlob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `${user.displayName || 'store'}_backup_${Date.now()}.json`;
+      link.download = `store_backup_${Date.now()}.json`;
       link.click();
       URL.revokeObjectURL(url);
     }
@@ -162,18 +204,17 @@ export default function Dashboard() {
   };
 
   const getIntegrationStatus = () => {
-    const required = ['printful', 'shopify', 'stripe'];
     const connected = Object.keys(integrations).filter(key =>
       integrations[key]?.status === 'connected'
     );
     return {
       total: Object.keys(integrations).length,
-      required: required.filter(r => connected.some(c => c.includes(r))).length,
+      connected: connected.length,
     };
   };
 
   const intStatus = getIntegrationStatus();
-  const isFullySetup = intStatus.required === 3 && Object.keys(integrations).length >= 3;
+  const isFullySetup = intStatus.connected >= 3 && Object.keys(integrations).length >= 3;
 
   // Generate chart data from orders
   const generateChartData = () => {
@@ -185,12 +226,16 @@ export default function Dashboard() {
     });
 
     orders.forEach(order => {
-      const date = new Date(order.createdAt || Date.now());
-      const dayIndex = date.getDay();
-      const day = days[(dayIndex + 6) % 7]; // Adjust to Monday start
+      try {
+        const date = new Date(order.createdAt || Date.now());
+        const dayIndex = date.getDay();
+        const day = days[(dayIndex + 6) % 7];
 
-      data[day].revenue += order.total || 0;
-      data[day].orders += 1;
+        data[day].revenue += parseFloat(order.total) || 0;
+        data[day].orders += 1;
+      } catch (e) {
+        console.error('Error processing order for chart:', e);
+      }
     });
 
     return Object.values(data);
@@ -199,7 +244,7 @@ export default function Dashboard() {
   const chartData = generateChartData();
 
   const productPerformance = products.slice(0, 5).map((p, idx) => ({
-    name: p.name || `Product ${idx + 1}`,
+    name: (p.name || `Product ${idx + 1}`).substring(0, 12),
     value: (idx + 1) * 20,
   }));
 
@@ -223,7 +268,7 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white">DropBoard</h1>
-            <p className="text-xs text-gray-400">Dropshipping Automation Platform</p>
+            <p className="text-xs text-gray-400">Dropshipping Automation</p>
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -262,8 +307,6 @@ export default function Dashboard() {
           </p>
           <div className="flex items-center gap-2 text-sm text-gray-500 mt-4">
             <span>📧 {user.email}</span>
-            <span className="text-gray-700">•</span>
-            <span>Account ID: {user.uid.substring(0, 8)}...</span>
           </div>
         </div>
 
@@ -277,9 +320,9 @@ export default function Dashboard() {
                   Complete Setup for Full Automation
                 </h3>
                 <p className="text-sm text-gray-400 mb-4">
-                  {intStatus.required === 3
+                  {intStatus.connected >= 3
                     ? 'Great! Core integrations connected. Add more platforms to expand.'
-                    : `Connect ${3 - intStatus.required} more integration(s) for full automation`}
+                    : `Connect ${Math.max(0, 3 - intStatus.connected)} more integration(s) for full automation`}
                 </p>
                 <div className="flex gap-3 flex-wrap">
                   <Link href="/integrations" className="btn btn-primary text-sm flex items-center gap-2">
@@ -293,8 +336,8 @@ export default function Dashboard() {
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-2xl font-bold text-yellow-400">{intStatus.total}/{intStatus.required + 3}</p>
-                <p className="text-xs text-gray-400">Integrations</p>
+                <p className="text-2xl font-bold text-yellow-400">{intStatus.connected}/3</p>
+                <p className="text-xs text-gray-400">Connected</p>
               </div>
             </div>
           </div>
@@ -527,7 +570,7 @@ export default function Dashboard() {
                       cx="50%"
                       cy="50%"
                       labelLine={false}
-                      label={({ name }) => name.substring(0, 8)}
+                      label={({ name }) => name}
                       outerRadius={80}
                       fill="#8884d8"
                       dataKey="value"
