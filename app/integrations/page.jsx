@@ -170,7 +170,7 @@ export default function Integrations() {
       console.log(`[${integrationId}] Sending request to API...`);
       console.log(`[${integrationId}] Payload:`, data);
 
-      const response = await fetch(`/api/integrations/${integrationId}/validate`, {
+      const response = await fetch(`/api/integrations/${integrationId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -483,3 +483,4 @@ export default function Integrations() {
     </div>
   );
 }
+
