@@ -1,25 +1,65 @@
 import { NextResponse } from 'next/server';
-import { db as firebaseDb } from '@/lib/firebase';
-import { collection, getDocs, query } from 'firebase/firestore';
+import { getFirestore, collection, getDocs } from 'firebase/firestore';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getFirestore as getAdminFirestore } from 'firebase-admin/firestore';
+
+// Initialize Firebase Admin SDK for server-side access
+let adminDb = null;
+
+function getAdminDb() {
+  if (!adminDb && process.env.FIREBASE_ADMIN_SDK_KEY) {
+    try {
+      const adminApp = getApps().length === 0 
+        ? initializeApp({
+            credential: cert(JSON.parse(process.env.FIREBASE_ADMIN_SDK_KEY)),
+          })
+        : getApps()[0];
+      
+      adminDb = getAdminFirestore(adminApp);
+    } catch (error) {
+      console.error('Error initializing Firebase Admin:', error);
+    }
+  }
+  return adminDb;
+}
 
 export async function GET(request) {
   try {
-    // Get user ID from header (sent by client)
+    // Get user ID from header
     const userId = request.headers.get('x-user-id');
     
     if (!userId) {
       console.log('[Trending API] ❌ No user ID in header');
       return NextResponse.json(
-        { success: false, error: 'Not authenticated', products: [], requiredApis: [] },
+        { 
+          success: false, 
+          error: 'Not authenticated', 
+          products: [], 
+          requiredApis: [],
+          connectedApis: []
+        },
         { status: 401 }
       );
     }
 
     console.log('[Trending API] 📥 Fetching for user:', userId);
 
-    // Get all connected integrations from Firestore
-    const integrationsRef = collection(firebaseDb, 'users', userId, 'integrations');
-    const integrationsSnapshot = await getDocs(integrationsRef);
+    const adminDb = getAdminDb();
+    
+    if (!adminDb) {
+      console.log('[Trending API] ⚠️ Firebase Admin not initialized, returning empty');
+      return NextResponse.json({
+        success: true,
+        products: [],
+        connectedApis: [],
+        requiredApis: ['printful', 'shopify', 'tiktok'],
+        message: 'Connect Printful, Shopify, or TikTok to see trending products',
+      });
+    }
+
+    // Get integrations using Admin SDK (has full access)
+    const integrationsRef = adminDb.collection('users').doc(userId).collection('integrations');
+    const integrationsSnapshot = await integrationsRef.get();
     
     const connectedApis = [];
     const integrations = {};
@@ -40,7 +80,7 @@ export async function GET(request) {
     let allProducts = [];
 
     // Fetch from Printful if connected
-    if (integrations.printful) {
+    if (integrations.printful?.credentials?.apiToken) {
       console.log('[Trending API] 🔄 Fetching from Printful...');
       try {
         const printfulProducts = await fetchPrintfulTrending(integrations.printful);
@@ -52,7 +92,7 @@ export async function GET(request) {
     }
 
     // Fetch from Shopify if connected
-    if (integrations.shopify) {
+    if (integrations.shopify?.credentials?.storeUrl && integrations.shopify?.credentials?.accessToken) {
       console.log('[Trending API] 🔄 Fetching from Shopify...');
       try {
         const shopifyProducts = await fetchShopifyTrending(integrations.shopify);
@@ -61,11 +101,6 @@ export async function GET(request) {
       } catch (error) {
         console.error('[Trending API] ❌ Shopify error:', error.message);
       }
-    }
-
-    // TikTok requires special OAuth
-    if (!integrations.tiktok && requiredApis.includes('tiktok')) {
-      console.log('[Trending API] ⚠️ TikTok not connected');
     }
 
     console.log('[Trending API] ✅ Total products:', allProducts.length);
@@ -82,8 +117,16 @@ export async function GET(request) {
 
   } catch (error) {
     console.error('[Trending API] ❌ Error:', error.message);
+    console.error('[Trending API] Stack:', error.stack);
+    
     return NextResponse.json(
-      { success: false, error: error.message, products: [], requiredApis: [] },
+      { 
+        success: false, 
+        error: error.message || 'Server error',
+        products: [], 
+        requiredApis: [],
+        connectedApis: []
+      },
       { status: 500 }
     );
   }
@@ -91,8 +134,7 @@ export async function GET(request) {
 
 // Fetch real Printful trending products
 async function fetchPrintfulTrending(printfulIntegration) {
-  const { credentials } = printfulIntegration;
-  const apiToken = credentials?.apiToken;
+  const apiToken = printfulIntegration.credentials?.apiToken;
 
   if (!apiToken) {
     throw new Error('No Printful API token');
@@ -131,9 +173,8 @@ async function fetchPrintfulTrending(printfulIntegration) {
 
 // Fetch real Shopify trending products
 async function fetchShopifyTrending(shopifyIntegration) {
-  const { credentials } = shopifyIntegration;
-  const storeUrl = credentials?.storeUrl;
-  const accessToken = credentials?.accessToken;
+  const storeUrl = shopifyIntegration.credentials?.storeUrl;
+  const accessToken = shopifyIntegration.credentials?.accessToken;
 
   if (!storeUrl || !accessToken) {
     throw new Error('No Shopify credentials');
@@ -197,7 +238,7 @@ async function fetchShopifyTrending(shopifyIntegration) {
         price: product.priceRange?.minVariantPrice?.amount,
         currency: product.priceRange?.minVariantPrice?.currencyCode,
         supplier: 'Shopify',
-        url: `https://${credentials.storeUrl}/products/${product.title.toLowerCase().replace(/\s+/g, '-')}`,
+        url: `https://${storeUrl}/products/${product.title.toLowerCase().replace(/\s+/g, '-')}`,
       };
     });
   } catch (err) {
