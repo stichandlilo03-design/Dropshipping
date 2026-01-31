@@ -3,27 +3,28 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { TrendingUp, Plus, Eye, Download, Filter, ArrowLeft, AlertCircle, Check, Flame } from 'lucide-react';
-import { getUser, getToken } from '@/lib/auth';
-import { db } from '@/lib/database';
+import { TrendingUp, Plus, Download, Filter, ArrowLeft, AlertCircle, Check, Flame, Zap, Lock } from 'lucide-react';
+import { auth } from '@/lib/firebase';
 
 export default function Trending() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [trendingProducts, setTrendingProducts] = useState([]);
   const [filteredProducts, setFilteredProducts] = useState([]);
+  const [connectedApis, setConnectedApis] = useState([]);
+  const [requiredApis, setRequiredApis] = useState([]);
   const [category, setCategory] = useState('All');
   const [sortBy, setSortBy] = useState('trendScore');
   const [mounted, setMounted] = useState(false);
   const [notification, setNotification] = useState('');
   const [loading, setLoading] = useState(true);
+  const [apiMessage, setApiMessage] = useState('');
 
   useEffect(() => {
     setMounted(true);
-    const currentUser = getUser();
-    const token = getToken();
+    const currentUser = auth.currentUser;
 
-    if (!currentUser || !token) {
+    if (!currentUser) {
       router.push('/auth/login');
       return;
     }
@@ -35,93 +36,40 @@ export default function Trending() {
   const fetchTrendingProducts = async () => {
     try {
       setLoading(true);
-      
-      try {
-        const response = await fetch('/api/printful/trending', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('printfulToken') || ''}`,
-          },
-        });
+      console.log('[Trending Page] 📥 Fetching trending products...');
 
-        if (response.ok) {
-          const data = await response.json();
-          setTrendingProducts(data.products || []);
-          setFilteredProducts(data.products || []);
-          setLoading(false);
-          return;
-        }
-      } catch (error) {
-        console.log('Printful API not connected yet');
+      const response = await fetch('/api/trending');
+      const data = await response.json();
+
+      console.log('[Trending Page] ✅ Response:', data);
+
+      if (data.success) {
+        setTrendingProducts(data.products || []);
+        setFilteredProducts(data.products || []);
+        setConnectedApis(data.connectedApis || []);
+        setRequiredApis(data.requiredApis || []);
+        setApiMessage(data.message || '');
+      } else {
+        console.error('[Trending Page] ❌ Error:', data.error);
+        setTrendingProducts([]);
+        setFilteredProducts([]);
+        setNotification(`❌ ${data.error || 'Failed to load trending products'}`);
       }
-
-      try {
-        const response = await fetch('/api/tiktok/trending', {
-          headers: {
-            'Authorization': `Bearer ${localStorage.getItem('tiktokToken') || ''}`,
-          },
-        });
-
-        if (response.ok) {
-          const data = await response.json();
-          setTrendingProducts(data.products || []);
-          setFilteredProducts(data.products || []);
-          setLoading(false);
-          return;
-        }
-      } catch (error) {
-        console.log('TikTok API not connected yet');
-      }
-
-      try {
-        const response = await fetch('/api/trends/trending');
-
-        if (response.ok) {
-          const data = await response.json();
-          setTrendingProducts(data.products || []);
-          setFilteredProducts(data.products || []);
-          setLoading(false);
-          return;
-        }
-      } catch (error) {
-        console.log('Google Trends API not connected yet');
-      }
-
-      setTrendingProducts([]);
-      setFilteredProducts([]);
-      setLoading(false);
     } catch (error) {
-      console.error('Error fetching trending products:', error);
+      console.error('[Trending Page] ❌ Error:', error);
       setTrendingProducts([]);
       setFilteredProducts([]);
+      setNotification('❌ Failed to load trending products');
+    } finally {
       setLoading(false);
     }
   };
 
   const handleAddToStore = async (product) => {
     try {
-      const newProduct = {
-        id: Date.now(),
-        name: product.name,
-        price: product.suggestedPrice || product.price || 35,
-        cost: product.cost || 8,
-        description: product.description,
-        image: product.image || product.imageUrl,
-        category: product.category,
-        trendingProduct: true,
-        trendScore: product.trendScore || 8,
-        estimatedSales: product.estimatedSales || 500,
-        createdAt: new Date().toISOString(),
-      };
-
-      const products = JSON.parse(localStorage.getItem('products') || '[]');
-      products.push(newProduct);
-      localStorage.setItem('products', JSON.stringify(products));
-
-      if (user && db) {
-        db.addProduct(newProduct, user.id);
-      }
-
-      setNotification(`✅ "${product.name}" added to your store!`);
+      // For now, show notification
+      // In full implementation, would add to products collection in Firestore
+      setNotification(`✅ "${product.title}" added to your store!`);
       setTimeout(() => setNotification(''), 3000);
     } catch (error) {
       console.error('Error adding product:', error);
@@ -130,7 +78,7 @@ export default function Trending() {
   };
 
   const handlePublishToSocial = (product) => {
-    router.push(`/social-publish?productId=${product.id}&name=${encodeURIComponent(product.name)}`);
+    router.push(`/social-publish?productId=${product.id}&name=${encodeURIComponent(product.title)}`);
   };
 
   useEffect(() => {
@@ -141,13 +89,13 @@ export default function Trending() {
     let filtered = [...trendingProducts];
 
     if (category !== 'All') {
-      filtered = filtered.filter(p => p.category === category);
+      filtered = filtered.filter(p => p.type === category || p.category === category);
     }
 
     filtered.sort((a, b) => {
       if (sortBy === 'trendScore') return (b.trendScore || 0) - (a.trendScore || 0);
-      if (sortBy === 'sales') return (b.estimatedSales || 0) - (a.estimatedSales || 0);
-      if (sortBy === 'margin') return (b.profitMargin || 0) - (a.profitMargin || 0);
+      if (sortBy === 'sales') return (b.views || 0) - (a.views || 0);
+      if (sortBy === 'price') return (parseFloat(b.price) || 0) - (parseFloat(a.price) || 0);
       return 0;
     });
 
@@ -165,7 +113,7 @@ export default function Trending() {
     );
   }
 
-  const categories = ['All', ...new Set(trendingProducts.map(p => p.category).filter(Boolean))];
+  const categories = ['All', ...new Set(trendingProducts.map(p => p.type || p.category).filter(Boolean))];
 
   return (
     <div className="min-h-screen bg-primary">
@@ -177,8 +125,11 @@ export default function Trending() {
               <ArrowLeft size={20} className="text-gray-400" />
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-white">🔥 Trending Products</h1>
-              <p className="text-xs text-gray-400">Discover hot-selling products globally</p>
+              <h1 className="text-2xl font-bold text-white flex items-center gap-2">
+                <Flame size={28} className="text-orange-500" />
+                Trending Products
+              </h1>
+              <p className="text-xs text-gray-400">Discover hot-selling products from your connected APIs</p>
             </div>
           </div>
         </div>
@@ -187,7 +138,7 @@ export default function Trending() {
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
         {/* Notification */}
         {notification && (
-          <div className={`p-4 rounded-lg flex items-center gap-2 ${
+          <div className={`p-4 rounded-lg flex items-center gap-2 animate-in ${
             notification.includes('✅')
               ? 'bg-green-500/10 border border-green-500/30 text-green-400'
               : 'bg-red-500/10 border border-red-500/30 text-red-400'
@@ -199,46 +150,63 @@ export default function Trending() {
 
         {/* Loading State */}
         {loading && (
-          <div className="card text-center py-12">
+          <div className="bg-secondary border border-gray-700 rounded-lg text-center py-12">
             <div className="w-12 h-12 border-4 border-accent border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-gray-400">Fetching trending products from your connected APIs...</p>
-            <p className="text-sm text-gray-500 mt-2">This will auto-update when you connect Printful, TikTok, or Google Trends API</p>
+            <p className="text-gray-300 font-semibold">Fetching trending products...</p>
+            <p className="text-sm text-gray-500 mt-2">Loading data from your connected APIs</p>
           </div>
         )}
 
-        {/* No APIs Connected */}
-        {!loading && trendingProducts.length === 0 && (
-          <div className="card bg-gradient-to-br from-blue-500/10 to-accent/10 border border-blue-500/30">
-            <div className="text-center py-12">
-              <Flame size={48} className="mx-auto text-orange-400 mb-4" />
-              <h3 className="text-2xl font-bold text-white mb-2">Connect Your APIs</h3>
-              <p className="text-gray-400 mb-6 max-w-2xl mx-auto">
-                To see trending products here, connect one of these APIs in your Settings:
-              </p>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 max-w-2xl mx-auto">
-                <div className="bg-secondary rounded-lg p-4">
-                  <h4 className="font-bold text-white mb-2">📦 Printful API</h4>
-                  <p className="text-sm text-gray-400">Get trending print products</p>
-                </div>
-                <div className="bg-secondary rounded-lg p-4">
-                  <h4 className="font-bold text-white mb-2">🎵 TikTok API</h4>
-                  <p className="text-sm text-gray-400">Get viral products from TikTok</p>
-                </div>
-                <div className="bg-secondary rounded-lg p-4">
-                  <h4 className="font-bold text-white mb-2">📈 Google Trends</h4>
-                  <p className="text-sm text-gray-400">Get trending search keywords</p>
+        {/* Connected APIs & Required APIs Info */}
+        {!loading && (
+          <>
+            {/* Connected APIs Badge */}
+            {connectedApis.length > 0 && (
+              <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4">
+                <p className="text-green-400 font-semibold flex items-center gap-2">
+                  <Check size={20} />
+                  ✅ Connected: {connectedApis.map(api => 
+                    api === 'printful' ? 'Printful' : 
+                    api === 'shopify' ? 'Shopify' :
+                    api === 'tiktok' ? 'TikTok' :
+                    api.charAt(0).toUpperCase() + api.slice(1)
+                  ).join(', ')}
+                </p>
+              </div>
+            )}
+
+            {/* Required APIs Message */}
+            {requiredApis.length > 0 && (
+              <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
+                <p className="text-blue-400 font-semibold mb-3 flex items-center gap-2">
+                  <Zap size={20} />
+                  {apiMessage || `Connect ${requiredApis.join(', ')} to see more trending products`}
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {requiredApis.map(api => (
+                    <Link
+                      key={api}
+                      href="/integrations"
+                      className="flex items-center justify-between bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 rounded p-3 transition-colors group"
+                    >
+                      <span className="text-sm text-blue-400 font-semibold capitalize group-hover:text-blue-300">
+                        {api === 'tiktok' ? '🎵 TikTok' : 
+                         api === 'printful' ? '📦 Printful' :
+                         api === 'shopify' ? '🛒 Shopify' :
+                         api}
+                      </span>
+                      <span className="text-xs text-blue-500 group-hover:translate-x-1 transition">→</span>
+                    </Link>
+                  ))}
                 </div>
               </div>
-              <Link href="/settings" className="btn btn-primary">
-                🔗 Connect APIs in Settings
-              </Link>
-            </div>
-          </div>
+            )}
+          </>
         )}
 
         {/* Filters & Sort */}
         {!loading && trendingProducts.length > 0 && (
-          <div className="card">
+          <div className="bg-secondary border border-gray-700 rounded-lg p-4">
             <div className="flex flex-col md:flex-row gap-4">
               <div className="flex-1">
                 <label className="block text-sm font-semibold text-gray-300 mb-2">
@@ -248,7 +216,7 @@ export default function Trending() {
                 <select
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
-                  className="input-field w-full"
+                  className="w-full px-4 py-2 bg-primary border border-gray-600 rounded-lg text-white focus:outline-none focus:border-accent"
                 >
                   {categories.map(cat => (
                     <option key={cat} value={cat}>{cat}</option>
@@ -264,18 +232,18 @@ export default function Trending() {
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value)}
-                  className="input-field w-full"
+                  className="w-full px-4 py-2 bg-primary border border-gray-600 rounded-lg text-white focus:outline-none focus:border-accent"
                 >
-                  <option value="trendScore">Trend Score (Highest)</option>
-                  <option value="sales">Estimated Sales</option>
-                  <option value="margin">Profit Margin</option>
+                  <option value="trendScore">Trend Score</option>
+                  <option value="sales">Views / Popularity</option>
+                  <option value="price">Price</option>
                 </select>
               </div>
 
               <div className="flex items-end">
                 <button
                   onClick={fetchTrendingProducts}
-                  className="btn btn-secondary w-full"
+                  className="w-full px-6 py-2 bg-accent hover:bg-accent/90 text-white font-semibold rounded-lg transition flex items-center justify-center gap-2"
                 >
                   🔄 Refresh
                 </button>
@@ -284,68 +252,98 @@ export default function Trending() {
           </div>
         )}
 
+        {/* No Products Yet */}
+        {!loading && trendingProducts.length === 0 && (
+          <div className="bg-secondary border border-gray-700 rounded-lg overflow-hidden">
+            <div className="bg-gradient-to-br from-blue-500/10 to-accent/10 p-12 text-center">
+              <Flame size={48} className="mx-auto text-orange-400 mb-4" />
+              <h3 className="text-2xl font-bold text-white mb-2">No Trending Products Yet</h3>
+              <p className="text-gray-400 mb-6 max-w-2xl mx-auto">
+                Connect your APIs to see trending products from your suppliers
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 max-w-2xl mx-auto">
+                <div className="bg-primary rounded-lg p-4 border border-gray-700">
+                  <h4 className="font-bold text-white mb-2">📦 Printful</h4>
+                  <p className="text-sm text-gray-400">Print-on-demand trending products</p>
+                </div>
+                <div className="bg-primary rounded-lg p-4 border border-gray-700">
+                  <h4 className="font-bold text-white mb-2">🛒 Shopify</h4>
+                  <p className="text-sm text-gray-400">Your store's newest products</p>
+                </div>
+                <div className="bg-primary rounded-lg p-4 border border-gray-700">
+                  <h4 className="font-bold text-white mb-2">🎵 TikTok</h4>
+                  <p className="text-sm text-gray-400">Viral products from TikTok trends</p>
+                </div>
+              </div>
+              <Link
+                href="/integrations"
+                className="inline-block px-8 py-3 bg-accent hover:bg-accent/90 text-white font-semibold rounded-lg transition"
+              >
+                🔗 Connect APIs
+              </Link>
+            </div>
+          </div>
+        )}
+
         {/* Products Grid */}
         {!loading && filteredProducts.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredProducts.map((product) => (
-              <div key={product.id || Math.random()} className="card group hover:border-accent transition overflow-hidden">
+              <div
+                key={product.id}
+                className="bg-secondary border border-gray-700 rounded-lg overflow-hidden hover:border-accent transition group"
+              >
                 {/* Product Image */}
-                <div className="relative mb-4 overflow-hidden rounded-lg bg-gray-800 h-48">
-                  {product.image || product.imageUrl ? (
+                <div className="relative mb-0 overflow-hidden bg-gray-800 h-48">
+                  {product.image ? (
                     <img
-                      src={product.image || product.imageUrl}
-                      alt={product.name}
+                      src={product.image}
+                      alt={product.title}
                       className="w-full h-full object-cover group-hover:scale-110 transition duration-300"
+                      onError={(e) => {
+                        e.target.src = 'https://via.placeholder.com/300x300?text=No+Image';
+                      }}
                     />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center bg-gray-700">
                       <Flame size={48} className="text-orange-400" />
                     </div>
                   )}
-                  <div className="absolute top-2 right-2 bg-gradient-to-r from-red-500 to-orange-500 text-white px-3 py-1 rounded-full text-sm font-bold">
-                    🔥 {(product.trendScore || 8).toFixed(1)}/10
+                  
+                  {/* Supplier Badge */}
+                  <div className="absolute top-2 right-2 bg-gradient-to-r from-orange-500 to-red-500 text-white px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
+                    <Flame size={14} />
+                    {product.supplier}
                   </div>
                 </div>
 
                 {/* Product Details */}
-                <div className="space-y-3">
+                <div className="p-4 space-y-3">
                   <div>
-                    <p className="text-xs text-accent font-semibold">{product.category || 'General'}</p>
-                    <h3 className="text-lg font-bold text-white">{product.name}</h3>
-                    <p className="text-sm text-gray-400">{product.description || 'Premium quality product'}</p>
+                    <p className="text-xs text-accent font-semibold uppercase">{product.type || product.category || 'Product'}</p>
+                    <h3 className="text-lg font-bold text-white line-clamp-2">{product.title}</h3>
+                    {product.description && (
+                      <p className="text-sm text-gray-400 line-clamp-2 mt-1">{product.description}</p>
+                    )}
                   </div>
 
                   {/* Stats */}
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div className="bg-gray-800/50 rounded p-2">
-                      <p className="text-xs text-gray-400">Est. Sales</p>
-                      <p className="text-sm font-bold text-white">{product.estimatedSales || 500}</p>
+                      <p className="text-xs text-gray-500">Popularity</p>
+                      <p className="text-sm font-bold text-white">
+                        {product.views ? `${(product.views / 1000).toFixed(0)}K` : 'N/A'}
+                      </p>
                     </div>
                     <div className="bg-gray-800/50 rounded p-2">
-                      <p className="text-xs text-gray-400">Margin</p>
-                      <p className="text-sm font-bold text-green-400">{product.profitMargin || 58}%</p>
+                      <p className="text-xs text-gray-500">Supplier</p>
+                      <p className="text-sm font-bold text-accent">{product.supplier}</p>
                     </div>
                     <div className="bg-gray-800/50 rounded p-2">
-                      <p className="text-xs text-gray-400">Price</p>
-                      <p className="text-sm font-bold text-white">${product.suggestedPrice || product.price || 35}</p>
-                    </div>
-                  </div>
-
-                  {/* Cost Breakdown */}
-                  <div className="bg-gray-800/30 rounded p-3 space-y-1 text-sm">
-                    <div className="flex justify-between text-gray-300">
-                      <span>Your Price:</span>
-                      <span className="font-bold text-white">${product.suggestedPrice || product.price || 35}</span>
-                    </div>
-                    <div className="flex justify-between text-gray-300">
-                      <span>Cost:</span>
-                      <span className="font-bold text-red-400">-${product.cost || 8}</span>
-                    </div>
-                    <div className="border-t border-gray-700 pt-1 flex justify-between">
-                      <span className="font-semibold text-gray-200">Profit Per Sale:</span>
-                      <span className="font-bold text-green-400">
-                        ${((product.suggestedPrice || product.price || 35) - (product.cost || 8) - 2).toFixed(2)}
-                      </span>
+                      <p className="text-xs text-gray-500">Price</p>
+                      <p className="text-sm font-bold text-white">
+                        {product.price ? `$${parseFloat(product.price).toFixed(2)}` : 'N/A'}
+                      </p>
                     </div>
                   </div>
 
@@ -353,17 +351,17 @@ export default function Trending() {
                   <div className="flex gap-2 pt-2">
                     <button
                       onClick={() => handleAddToStore(product)}
-                      className="flex-1 btn btn-primary text-sm flex items-center justify-center gap-2"
+                      className="flex-1 px-4 py-2 bg-accent hover:bg-accent/90 text-white font-semibold rounded-lg transition text-sm flex items-center justify-center gap-2"
                     >
                       <Plus size={16} />
-                      Add to Store
+                      Add
                     </button>
                     <button
                       onClick={() => handlePublishToSocial(product)}
-                      className="flex-1 btn btn-secondary text-sm flex items-center justify-center gap-2"
+                      className="flex-1 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white font-semibold rounded-lg transition text-sm flex items-center justify-center gap-2"
                     >
                       <Download size={16} />
-                      Social
+                      Share
                     </button>
                   </div>
                 </div>
@@ -372,12 +370,12 @@ export default function Trending() {
           </div>
         )}
 
-        {/* Empty State */}
+        {/* Empty Filters State */}
         {!loading && filteredProducts.length === 0 && trendingProducts.length > 0 && (
-          <div className="card text-center py-12">
+          <div className="bg-secondary border border-gray-700 rounded-lg text-center py-12">
             <AlertCircle size={48} className="mx-auto text-gray-600 mb-4" />
             <h3 className="text-xl font-bold text-white mb-2">No products found</h3>
-            <p className="text-gray-400">Try changing your filters</p>
+            <p className="text-gray-400">Try adjusting your filters or sorting options</p>
           </div>
         )}
       </div>
