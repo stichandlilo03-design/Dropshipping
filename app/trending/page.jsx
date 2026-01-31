@@ -38,7 +38,11 @@ export default function Trending() {
       setLoading(true);
       console.log('[Trending Page] 📥 Fetching trending products...');
 
-      const response = await fetch('/api/trending');
+      const response = await fetch('/api/trending', {
+        headers: {
+          'x-user-id': user?.uid,
+        },
+      });
       const data = await response.json();
 
       console.log('[Trending Page] ✅ Response:', data);
