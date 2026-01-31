@@ -8,77 +8,94 @@ export async function POST(request) {
 
     if (!clientId || !clientSecret) {
       return NextResponse.json(
-        { error: 'Missing required credentials' },
+        { error: 'Missing Client ID or Client Secret' },
         { status: 400 }
       );
     }
 
-    // Validate with Printful API
+    console.log('Printful validation: attempting connection...');
+
+    // Test direct API connection with basic auth
     try {
       const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
       
-      const response = await fetch('https://api.printful.com/oauth/token/', {
-        method: 'POST',
+      // First, try to get stores info
+      const response = await fetch('https://api.printful.com/v2/stores', {
+        method: 'GET',
         headers: {
           'Authorization': `Basic ${auth}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Type': 'application/json',
         },
-        body: new URLSearchParams({
-          grant_type: 'client_credentials',
-        }).toString(),
       });
+
+      console.log('Printful response status:', response.status);
 
       if (!response.ok) {
+        const errorData = await response.text();
+        console.error('Printful error:', errorData);
+
+        if (response.status === 401) {
+          return NextResponse.json(
+            { error: 'Invalid Printful credentials. Check your Client ID and Client Secret in Printful Dashboard → Apps → Your App → Credentials' },
+            { status: 401 }
+          );
+        }
+
+        if (response.status === 403) {
+          return NextResponse.json(
+            { error: 'Access denied. Make sure your app has the correct permissions in Printful' },
+            { status: 403 }
+          );
+        }
+
         return NextResponse.json(
-          { error: 'Invalid Printful credentials' },
-          { status: 401 }
+          { error: `Printful API error: ${response.statusText}` },
+          { status: response.status }
         );
       }
 
-      const tokenData = await response.json();
-
-      // Get store info to verify connection
-      const storeResponse = await fetch('https://api.printful.com/v2/stores', {
-        headers: {
-          'Authorization': `Bearer ${tokenData.access_token}`,
-        },
-      });
-
-      if (!storeResponse.ok) {
+      const data = await response.json();
+      
+      if (!data.data || data.data.length === 0) {
         return NextResponse.json(
-          { error: 'Failed to verify store access' },
-          { status: 401 }
+          { error: 'No stores found in Printful account. Create a store first in Printful Dashboard' },
+          { status: 400 }
         );
       }
 
-      const storeData = await storeResponse.json();
+      const store = data.data[0];
 
       const credentials = {
         clientId,
-        clientSecret,
-        accessToken: tokenData.access_token,
-        tokenType: tokenData.token_type,
-        expiresIn: tokenData.expires_in,
-        storeId: storeData.data?.[0]?.id || null,
-        storeName: storeData.data?.[0]?.name || null,
+        clientSecret: clientSecret.substring(0, 5) + '...' + clientSecret.substring(-5), // Hide secret
+        storeId: store.id,
+        storeName: store.name,
+        storeEmail: store.created,
         connectedAt: new Date().toISOString(),
       };
 
+      console.log('Printful connection successful:', { storeName: store.name });
+
       return NextResponse.json({
         success: true,
-        message: 'Printful connected successfully',
+        message: `Successfully connected to Printful store: ${store.name}!`,
         credentials,
       });
-    } catch (error) {
-      console.error('Printful validation error:', error);
+
+    } catch (apiError) {
+      console.error('Printful API error:', apiError);
+      
       return NextResponse.json(
-        { error: 'Failed to validate with Printful API' },
+        { 
+          error: `Failed to connect to Printful: ${apiError.message}. Check your credentials and try again.` 
+        },
         { status: 500 }
       );
     }
   } catch (error) {
+    console.error('Validation error:', error);
     return NextResponse.json(
-      { error: 'Internal server error' },
+      { error: `Server error: ${error.message}` },
       { status: 500 }
     );
   }
