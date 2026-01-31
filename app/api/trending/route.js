@@ -2,10 +2,6 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 
-// Import Firestore the SAME WAY as integrations page
-import { collection, getDocs } from 'firebase/firestore';
-import { db as firebaseDb } from '@/lib/firebase';
-
 export async function GET(request) {
   try {
     const userId = request.headers.get('x-user-id');
@@ -23,28 +19,39 @@ export async function GET(request) {
 
     console.log('[Trending API] 📥 User:', userId);
 
-    // EXACT SAME METHOD AS INTEGRATIONS PAGE
-    console.log('[Trending API] 🔍 Querying integrations...');
-    const integrationsRef = collection(firebaseDb, 'users', userId, 'integrations');
-    const snapshot = await getDocs(integrationsRef);
+    // Get integrations from Firestore via client request
+    const integrationsParam = request.headers.get('x-integrations');
     
-    console.log('[Trending API] 📊 Found', snapshot.size, 'integrations');
+    if (!integrationsParam) {
+      console.log('[Trending API] ❌ No integrations data');
+      return NextResponse.json({
+        success: false,
+        error: 'No integrations data',
+        products: [],
+        connectedApis: [],
+        requiredApis: ['printful', 'shopify', 'tiktok'],
+      }, { status: 400 });
+    }
 
-    const connectedApis = [];
-    const integrations = {};
+    let integrations = {};
+    try {
+      integrations = JSON.parse(integrationsParam);
+    } catch (e) {
+      console.error('[Trending API] ❌ Failed to parse integrations:', e);
+      return NextResponse.json({
+        success: false,
+        error: 'Invalid integrations data',
+        products: [],
+        connectedApis: [],
+        requiredApis: ['printful', 'shopify', 'tiktok'],
+      }, { status: 400 });
+    }
 
-    // EXACT SAME LOOP AS INTEGRATIONS PAGE
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      console.log('✅ Found:', doc.id, data);
-      
-      if (data?.status === 'connected') {
-        connectedApis.push(doc.id);
-        integrations[doc.id] = data;
-      }
-    });
+    const connectedApis = Object.keys(integrations).filter(
+      key => integrations[key]?.status === 'connected'
+    );
 
-    console.log('✅ Connected APIs:', connectedApis);
+    console.log('[Trending API] ✅ Connected APIs:', connectedApis);
 
     const requiredApis = ['printful', 'shopify', 'tiktok'].filter(
       api => !connectedApis.includes(api)
@@ -76,6 +83,8 @@ export async function GET(request) {
           }));
           allProducts = allProducts.concat(products);
           console.log('[Trending API] ✅ Printful:', products.length, 'products');
+        } else {
+          console.error('[Trending API] ❌ Printful returned:', response.status);
         }
       } catch (err) {
         console.error('[Trending API] ❌ Printful error:', err.message);
@@ -83,12 +92,16 @@ export async function GET(request) {
     }
 
     // Fetch from Shopify
-    if (connectedApis.includes('shopify') && integrations.shopify?.credentials?.storeUrl && integrations.shopify?.credentials?.accessToken) {
+    if (
+      connectedApis.includes('shopify') &&
+      integrations.shopify?.credentials?.storeUrl &&
+      integrations.shopify?.credentials?.accessToken
+    ) {
       console.log('[Trending API] 🔄 Fetching Shopify...');
       try {
         const storeUrl = integrations.shopify.credentials.storeUrl;
         const token = integrations.shopify.credentials.accessToken;
-        
+
         const response = await fetch(
           `https://${storeUrl}/admin/api/2024-01/graphql.json`,
           {
@@ -110,14 +123,17 @@ export async function GET(request) {
                     }
                   }
                 }
-              }`
+              }`,
             }),
           }
         );
 
         if (response.ok) {
           const data = await response.json();
-          if (!data.errors) {
+
+          if (data.errors) {
+            console.error('[Trending API] ❌ Shopify error:', data.errors[0]?.message);
+          } else {
             const products = (data.data?.products?.edges || []).map(edge => {
               const p = edge.node;
               return {
@@ -126,39 +142,44 @@ export async function GET(request) {
                 supplier: 'Shopify',
                 image: p.featuredImage?.url,
                 price: p.priceRange?.minVariantPrice?.amount,
+                description: p.description?.substring(0, 100),
               };
             });
             allProducts = allProducts.concat(products);
             console.log('[Trending API] ✅ Shopify:', products.length, 'products');
           }
+        } else {
+          console.error('[Trending API] ❌ Shopify returned:', response.status);
         }
       } catch (err) {
         console.error('[Trending API] ❌ Shopify error:', err.message);
       }
     }
 
-    console.log('[Trending API] 📦 Total:', allProducts.length, 'products');
+    console.log('[Trending API] 📦 Total products:', allProducts.length);
 
     return NextResponse.json({
       success: true,
       products: allProducts,
       connectedApis: connectedApis,
       requiredApis: requiredApis,
-      message: connectedApis.length > 0
-        ? `${allProducts.length} products from ${connectedApis.join(', ')}`
-        : 'Connect APIs to see products',
+      message:
+        connectedApis.length > 0
+          ? `${allProducts.length} products from ${connectedApis.join(', ')}`
+          : 'Connect APIs to see products',
     });
-
   } catch (error) {
     console.error('[Trending API] 💥 Error:', error.message);
-    console.error('[Trending API] Stack:', error.stack);
-    
-    return NextResponse.json({
-      success: false,
-      error: error.message,
-      products: [],
-      connectedApis: [],
-      requiredApis: ['printful', 'shopify', 'tiktok'],
-    }, { status: 500 });
+
+    return NextResponse.json(
+      {
+        success: false,
+        error: error.message,
+        products: [],
+        connectedApis: [],
+        requiredApis: ['printful', 'shopify', 'tiktok'],
+      },
+      { status: 500 }
+    );
   }
 }
