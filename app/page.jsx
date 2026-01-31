@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
 import { DollarSign, ShoppingCart, Package, TrendingUp, Zap, Users, LogOut, Settings, Download, BookOpen, ArrowRight, Plus, Flame, Smartphone, Share2, Link as LinkIcon, Eye, AlertCircle, CheckCircle, Clock } from 'lucide-react';
-import { getUser, logout, getToken } from '@/lib/auth';
+import { auth } from '@/lib/firebase';
+import { signOut } from 'firebase/auth';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db as firebaseDb } from '@/lib/firebase';
 
@@ -27,43 +28,30 @@ export default function Dashboard() {
   });
 
   useEffect(() => {
-    const currentUser = getUser();
-    const token = getToken();
+    // Check if user is authenticated
+    const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
+      if (!currentUser) {
+        router.push('/auth/login');
+        return;
+      }
 
-    console.log('Current user:', currentUser);
+      setUser(currentUser);
+      await loadData(currentUser.uid);
+    });
 
-    if (!currentUser || !token) {
-      router.push('/auth/login');
-      return;
-    }
-
-    setUser(currentUser);
-
-    // Get userId from different possible properties
-    const userId = currentUser.uid || currentUser.id || currentUser.userId;
-    
-    console.log('User ID:', userId);
-
-    if (!userId) {
-      console.error('No valid user ID found');
-      setLoading(false);
-      return;
-    }
-
-    loadData(userId);
+    return () => unsubscribe();
   }, [router]);
 
   const loadData = async (userId) => {
     try {
       setLoading(true);
-      console.log('Loading data for user:', userId);
 
-      // Validate userId is a string and not undefined
-      if (!userId || typeof userId !== 'string') {
-        console.error('Invalid userId:', userId);
-        setLoading(false);
+      if (!userId) {
+        console.error('No userId provided');
         return;
       }
+
+      console.log('Loading data for userId:', userId);
 
       // Load orders from Firestore
       try {
@@ -78,6 +66,9 @@ export default function Dashboard() {
         }));
         console.log('Orders loaded:', ordersData.length);
         setOrders(ordersData);
+
+        // Calculate stats
+        calculateStats(ordersData, products);
       } catch (ordersError) {
         console.error('Error loading orders:', ordersError);
         setOrders([]);
@@ -96,6 +87,9 @@ export default function Dashboard() {
         }));
         console.log('Products loaded:', productsData.length);
         setProducts(productsData);
+
+        // Calculate stats
+        calculateStats(orders, productsData);
       } catch (productsError) {
         console.error('Error loading products:', productsError);
         setProducts([]);
@@ -104,8 +98,10 @@ export default function Dashboard() {
       // Load integrations from Firestore
       try {
         const integrationsData = {};
-        const integrationsCollection = collection(firebaseDb, 'users', userId, 'integrations');
-        const integrationsSnap = await getDocs(integrationsCollection);
+        const integrationsQuery = query(
+          collection(firebaseDb, 'users', userId, 'integrations')
+        );
+        const integrationsSnap = await getDocs(integrationsQuery);
         integrationsSnap.forEach(doc => {
           integrationsData[doc.id] = doc.data();
         });
@@ -115,43 +111,42 @@ export default function Dashboard() {
         console.error('Error loading integrations:', integrationsError);
         setIntegrations({});
       }
-
-      // Calculate stats will be done after data is loaded
     } catch (error) {
-      console.error('Fatal error loading data:', error);
+      console.error('Error loading data:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  // Calculate stats when orders/products change
-  useEffect(() => {
-    if (!loading) {
-      calculateStats(orders, products);
-    }
-  }, [orders, products, loading]);
-
   const calculateStats = (ordersData, productsData) => {
-    const totalRevenue = ordersData.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0);
-    const totalCost = ordersData.reduce((sum, order) => sum + (parseFloat(order.cost) || 0), 0);
-    const totalProfit = totalRevenue - totalCost;
-    const profitMargin = totalRevenue > 0 ? Math.round((totalProfit / totalRevenue) * 100) : 0;
-    const avgOrderValue = ordersData.length > 0 ? (totalRevenue / ordersData.length).toFixed(2) : 0;
+    try {
+      const totalRevenue = ordersData.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0);
+      const totalCost = ordersData.reduce((sum, order) => sum + (parseFloat(order.cost) || 0), 0);
+      const totalProfit = totalRevenue - totalCost;
+      const profitMargin = totalRevenue > 0 ? Math.round((totalProfit / totalRevenue) * 100) : 0;
+      const avgOrderValue = ordersData.length > 0 ? (totalRevenue / ordersData.length).toFixed(2) : 0;
 
-    setStats({
-      totalRevenue: totalRevenue.toFixed(2),
-      totalProfit: totalProfit.toFixed(2),
-      totalCost: totalCost.toFixed(2),
-      totalOrders: ordersData.length,
-      totalProducts: productsData.length,
-      profitMargin,
-      avgOrderValue,
-    });
+      setStats({
+        totalRevenue: totalRevenue.toFixed(2),
+        totalProfit: totalProfit.toFixed(2),
+        totalCost: totalCost.toFixed(2),
+        totalOrders: ordersData.length,
+        totalProducts: productsData.length,
+        profitMargin,
+        avgOrderValue,
+      });
+    } catch (error) {
+      console.error('Error calculating stats:', error);
+    }
   };
 
-  const handleLogout = () => {
-    logout();
-    router.push('/auth/login');
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      router.push('/auth/login');
+    } catch (error) {
+      console.error('Error logging out:', error);
+    }
   };
 
   const handleExport = () => {
@@ -159,12 +154,13 @@ export default function Dashboard() {
       const data = {
         user: {
           email: user.email,
+          uid: user.uid,
           exportedAt: new Date().toISOString(),
         },
         stats,
-        ordersCount: orders.length,
-        productsCount: products.length,
-        integrationsConnected: Object.keys(integrations),
+        orders,
+        products,
+        integrations: Object.keys(integrations),
       };
 
       const dataStr = JSON.stringify(data, null, 2);
@@ -172,7 +168,7 @@ export default function Dashboard() {
       const url = URL.createObjectURL(dataBlob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `store_backup_${Date.now()}.json`;
+      link.download = `dropboard_backup_${Date.now()}.json`;
       link.click();
       URL.revokeObjectURL(url);
     }
@@ -204,17 +200,18 @@ export default function Dashboard() {
   };
 
   const getIntegrationStatus = () => {
+    const required = ['printful', 'shopify', 'stripe'];
     const connected = Object.keys(integrations).filter(key =>
       integrations[key]?.status === 'connected'
     );
     return {
       total: Object.keys(integrations).length,
-      connected: connected.length,
+      required: required.filter(r => connected.some(c => c.includes(r))).length,
     };
   };
 
   const intStatus = getIntegrationStatus();
-  const isFullySetup = intStatus.connected >= 3 && Object.keys(integrations).length >= 3;
+  const isFullySetup = intStatus.required === 3 && Object.keys(integrations).length >= 3;
 
   // Generate chart data from orders
   const generateChartData = () => {
@@ -234,7 +231,7 @@ export default function Dashboard() {
         data[day].revenue += parseFloat(order.total) || 0;
         data[day].orders += 1;
       } catch (e) {
-        console.error('Error processing order for chart:', e);
+        console.warn('Error processing order for chart:', e);
       }
     });
 
@@ -250,12 +247,25 @@ export default function Dashboard() {
 
   const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
 
-  if (loading || !user) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-primary flex items-center justify-center">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-accent border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-400">Loading dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-primary flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-gray-400 mb-4">You need to be logged in to view this page</p>
+          <Link href="/auth/login" className="text-accent hover:underline">
+            Go to Login
+          </Link>
         </div>
       </div>
     );
@@ -268,7 +278,7 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-white">DropBoard</h1>
-            <p className="text-xs text-gray-400">Dropshipping Automation</p>
+            <p className="text-xs text-gray-400">Dropshipping Automation Platform</p>
           </div>
           <div className="flex items-center gap-3">
             <button
@@ -306,7 +316,9 @@ export default function Dashboard() {
             {getWelcomeMessage(stats.totalOrders)}
           </p>
           <div className="flex items-center gap-2 text-sm text-gray-500 mt-4">
-            <span>📧 {user.email}</span>
+            <span>📧 {user.email || 'User'}</span>
+            <span className="text-gray-700">•</span>
+            <span>Account ID: {user.uid ? user.uid.substring(0, 8) : 'N/A'}...</span>
           </div>
         </div>
 
@@ -320,9 +332,9 @@ export default function Dashboard() {
                   Complete Setup for Full Automation
                 </h3>
                 <p className="text-sm text-gray-400 mb-4">
-                  {intStatus.connected >= 3
+                  {intStatus.required === 3
                     ? 'Great! Core integrations connected. Add more platforms to expand.'
-                    : `Connect ${Math.max(0, 3 - intStatus.connected)} more integration(s) for full automation`}
+                    : `Connect ${3 - intStatus.required} more integration(s) for full automation`}
                 </p>
                 <div className="flex gap-3 flex-wrap">
                   <Link href="/integrations" className="btn btn-primary text-sm flex items-center gap-2">
@@ -336,14 +348,14 @@ export default function Dashboard() {
                 </div>
               </div>
               <div className="text-right">
-                <p className="text-2xl font-bold text-yellow-400">{intStatus.connected}/3</p>
-                <p className="text-xs text-gray-400">Connected</p>
+                <p className="text-2xl font-bold text-yellow-400">{intStatus.total}/{intStatus.required + 3}</p>
+                <p className="text-xs text-gray-400">Integrations</p>
               </div>
             </div>
           </div>
         )}
 
-        {/* Success Banner - All Connected */}
+        {/* Success Banner */}
         {isFullySetup && (
           <div className="card bg-green-500/5 border border-green-500/30">
             <div className="flex items-center gap-3">
@@ -394,7 +406,7 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Integrations Status */}
+          {/* Integrations */}
           <div className="card">
             <div className="flex items-center justify-between">
               <div>
@@ -431,7 +443,99 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Integration Status Cards */}
+        {/* Trending Products Section - TOP SELLING PRODUCTS */}
+        <div>
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-2xl font-bold text-white flex items-center gap-2">
+              <Flame size={28} className="text-orange-400" />
+              🔥 Trending Products
+            </h3>
+            <Link href="/trending" className="text-accent hover:text-emerald-400 font-semibold transition text-sm">
+              View All →
+            </Link>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Trending Product 1 */}
+            <div className="card bg-gradient-to-br from-orange-500/10 to-red-500/10 border border-orange-500/30 group hover:border-accent transition">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex-1">
+                  <p className="text-xs text-orange-400 font-bold">🔥 TRENDING #1</p>
+                  <h4 className="text-base font-bold text-white">Programmer Coffee T-Shirt</h4>
+                </div>
+                <span className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-2 py-1 rounded text-xs font-bold">9.2/10</span>
+              </div>
+              <p className="text-xs text-gray-400 mb-3">Perfect for developers</p>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <p className="text-xs text-gray-400">Est. Sales</p>
+                  <p className="text-sm font-bold text-white">500+</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-gray-400">Margin</p>
+                  <p className="text-sm font-bold text-green-400">58%</p>
+                </div>
+              </div>
+              <Link href="/trending" className="w-full btn btn-primary text-xs flex items-center justify-center gap-2 py-2">
+                <Plus size={14} />
+                Add to Store
+              </Link>
+            </div>
+
+            {/* Trending Product 2 */}
+            <div className="card bg-gradient-to-br from-pink-500/10 to-purple-500/10 border border-pink-500/30 group hover:border-accent transition">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex-1">
+                  <p className="text-xs text-pink-400 font-bold">🔥 TRENDING #2</p>
+                  <h4 className="text-base font-bold text-white">Dog Mom Hoodie</h4>
+                </div>
+                <span className="bg-gradient-to-r from-pink-500 to-purple-500 text-white px-2 py-1 rounded text-xs font-bold">8.7/10</span>
+              </div>
+              <p className="text-xs text-gray-400 mb-3">For dog lovers</p>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <p className="text-xs text-gray-400">Est. Sales</p>
+                  <p className="text-sm font-bold text-white">800+</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-gray-400">Margin</p>
+                  <p className="text-sm font-bold text-green-400">62%</p>
+                </div>
+              </div>
+              <Link href="/trending" className="w-full btn btn-primary text-xs flex items-center justify-center gap-2 py-2">
+                <Plus size={14} />
+                Add to Store
+              </Link>
+            </div>
+
+            {/* Trending Product 3 */}
+            <div className="card bg-gradient-to-br from-green-500/10 to-teal-500/10 border border-green-500/30 group hover:border-accent transition">
+              <div className="flex items-start justify-between mb-3">
+                <div className="flex-1">
+                  <p className="text-xs text-green-400 font-bold">🔥 TRENDING #3</p>
+                  <h4 className="text-base font-bold text-white">Yoga Zen Mug</h4>
+                </div>
+                <span className="bg-gradient-to-r from-green-500 to-teal-500 text-white px-2 py-1 rounded text-xs font-bold">8.1/10</span>
+              </div>
+              <p className="text-xs text-gray-400 mb-3">Perfect for yoga lovers</p>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <p className="text-xs text-gray-400">Est. Sales</p>
+                  <p className="text-sm font-bold text-white">1,200+</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs text-gray-400">Margin</p>
+                  <p className="text-sm font-bold text-green-400">64%</p>
+                </div>
+              </div>
+              <Link href="/trending" className="w-full btn btn-primary text-xs flex items-center justify-center gap-2 py-2">
+                <Plus size={14} />
+                Add to Store
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        {/* Integration Status */}
         <div>
           <h3 className="text-2xl font-bold text-white mb-6">Integration Status</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
@@ -446,9 +550,7 @@ export default function Dashboard() {
                 )}
               </div>
               <p className="text-xs text-gray-400 mb-4">
-                {integrations.printful?.status === 'connected'
-                  ? 'Connected'
-                  : 'Not connected'}
+                {integrations.printful?.status === 'connected' ? 'Connected' : 'Not connected'}
               </p>
               <Link href="/integrations" className="text-accent text-xs font-semibold hover:underline">
                 {integrations.printful?.status === 'connected' ? 'Manage →' : 'Connect →'}
@@ -466,9 +568,7 @@ export default function Dashboard() {
                 )}
               </div>
               <p className="text-xs text-gray-400 mb-4">
-                {integrations.shopify?.status === 'connected'
-                  ? 'Connected'
-                  : 'Not connected'}
+                {integrations.shopify?.status === 'connected' ? 'Connected' : 'Not connected'}
               </p>
               <Link href="/integrations" className="text-accent text-xs font-semibold hover:underline">
                 {integrations.shopify?.status === 'connected' ? 'Manage →' : 'Connect →'}
@@ -486,9 +586,7 @@ export default function Dashboard() {
                 )}
               </div>
               <p className="text-xs text-gray-400 mb-4">
-                {integrations.stripe?.status === 'connected'
-                  ? 'Connected'
-                  : 'Not connected'}
+                {integrations.stripe?.status === 'connected' ? 'Connected' : 'Not connected'}
               </p>
               <Link href="/integrations" className="text-accent text-xs font-semibold hover:underline">
                 {integrations.stripe?.status === 'connected' ? 'Manage →' : 'Connect →'}
@@ -499,19 +597,17 @@ export default function Dashboard() {
             <div className="card">
               <div className="flex items-center justify-between mb-3">
                 <p className="text-sm font-semibold text-white">🎵 TikTok</p>
-                {integrations['tiktok']?.status === 'connected' ? (
+                {integrations.tiktok?.status === 'connected' ? (
                   <CheckCircle size={16} className="text-green-400" />
                 ) : (
                   <Clock size={16} className="text-gray-400" />
                 )}
               </div>
               <p className="text-xs text-gray-400 mb-4">
-                {integrations['tiktok']?.status === 'connected'
-                  ? 'Connected'
-                  : 'Not connected'}
+                {integrations.tiktok?.status === 'connected' ? 'Connected' : 'Not connected'}
               </p>
               <Link href="/integrations" className="text-accent text-xs font-semibold hover:underline">
-                {integrations['tiktok']?.status === 'connected' ? 'Manage →' : 'Connect →'}
+                {integrations.tiktok?.status === 'connected' ? 'Manage →' : 'Connect →'}
               </Link>
             </div>
 
@@ -526,9 +622,7 @@ export default function Dashboard() {
                 )}
               </div>
               <p className="text-xs text-gray-400 mb-4">
-                {integrations['gmail-smtp']?.status === 'connected'
-                  ? 'Connected'
-                  : 'Not connected'}
+                {integrations['gmail-smtp']?.status === 'connected' ? 'Connected' : 'Not connected'}
               </p>
               <Link href="/integrations" className="text-accent text-xs font-semibold hover:underline">
                 {integrations['gmail-smtp']?.status === 'connected' ? 'Manage →' : 'Connect →'}
@@ -548,10 +642,7 @@ export default function Dashboard() {
                   <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                   <XAxis dataKey="day" stroke="#9ca3af" />
                   <YAxis stroke="#9ca3af" />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #374151' }}
-                    formatter={(value) => `$${value.toFixed(2)}`}
-                  />
+                  <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #374151' }} />
                   <Legend />
                   <Bar dataKey="revenue" fill="#10b981" radius={[8, 8, 0, 0]} />
                   <Bar dataKey="orders" fill="#3b82f6" radius={[8, 8, 0, 0]} />
@@ -591,53 +682,84 @@ export default function Dashboard() {
         <div>
           <h3 className="text-2xl font-bold text-white mb-6">Quick Actions</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            {/* Orders */}
             <Link href="/orders" className="card group hover:border-accent transition">
               <ShoppingCart size={24} className="text-blue-400 mb-2" />
-              <p className="font-semibold text-white group-hover:text-accent transition">Orders</p>
+              <p className="font-semibold text-white">Orders</p>
               <p className="text-xs text-gray-400">{stats.totalOrders} orders</p>
               <div className="flex items-center gap-1 text-accent text-xs mt-3">
                 View <ArrowRight size={12} />
               </div>
             </Link>
 
-            {/* Products */}
             <Link href="/products" className="card group hover:border-accent transition">
               <Package size={24} className="text-purple-400 mb-2" />
-              <p className="font-semibold text-white group-hover:text-accent transition">Products</p>
+              <p className="font-semibold text-white">Products</p>
               <p className="text-xs text-gray-400">{stats.totalProducts} products</p>
               <div className="flex items-center gap-1 text-accent text-xs mt-3">
                 Manage <ArrowRight size={12} />
               </div>
             </Link>
 
-            {/* Integrations */}
-            <Link href="/integrations" className="card group hover:border-accent transition">
-              <Zap size={24} className="text-yellow-400 mb-2" />
-              <p className="font-semibold text-white group-hover:text-accent transition">Integrations</p>
-              <p className="text-xs text-gray-400">{Object.keys(integrations).length} connected</p>
+            <Link href="/trending" className="card group hover:border-accent transition">
+              <Flame size={24} className="text-orange-400 mb-2" />
+              <p className="font-semibold text-white">Trending</p>
+              <p className="text-xs text-gray-400">Hot products</p>
               <div className="flex items-center gap-1 text-accent text-xs mt-3">
-                Setup <ArrowRight size={12} />
+                Discover <ArrowRight size={12} />
               </div>
             </Link>
 
-            {/* Analytics */}
             <Link href="/analytics" className="card group hover:border-accent transition">
               <TrendingUp size={24} className="text-green-400 mb-2" />
-              <p className="font-semibold text-white group-hover:text-accent transition">Analytics</p>
-              <p className="text-xs text-gray-400">Detailed insights</p>
+              <p className="font-semibold text-white">Analytics</p>
+              <p className="text-xs text-gray-400">Insights</p>
               <div className="flex items-center gap-1 text-accent text-xs mt-3">
                 View <ArrowRight size={12} />
               </div>
             </Link>
 
-            {/* Settings */}
-            <Link href="/settings" className="card group hover:border-accent transition">
-              <Settings size={24} className="text-orange-400 mb-2" />
-              <p className="font-semibold text-white group-hover:text-accent transition">Settings</p>
-              <p className="text-xs text-gray-400">Configure automations</p>
+            <Link href="/integrations" className="card group hover:border-accent transition">
+              <Zap size={24} className="text-yellow-400 mb-2" />
+              <p className="font-semibold text-white">Integrations</p>
+              <p className="text-xs text-gray-400">{Object.keys(integrations).length} connected</p>
               <div className="flex items-center gap-1 text-accent text-xs mt-3">
-                Configure <ArrowRight size={12} />
+                Setup <ArrowRight size={12} />
+              </div>
+            </Link>
+          </div>
+        </div>
+
+        {/* Business Tools Section */}
+        <div>
+          <h3 className="text-2xl font-bold text-white mb-6">💼 Business Tools</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {/* Product Manager */}
+            <Link href="/products-manager" className="card group hover:border-accent transition">
+              <LinkIcon size={24} className="text-blue-400 mb-2" />
+              <h4 className="font-bold text-white mb-2">Product Manager</h4>
+              <p className="text-xs text-gray-400 mb-4">Manage URLs, direct links for ads, bulk edit products</p>
+              <div className="flex items-center gap-1 text-accent text-xs">
+                Manage <ArrowRight size={12} />
+              </div>
+            </Link>
+
+            {/* Social Media */}
+            <Link href="/social-publish" className="card group hover:border-accent transition">
+              <Share2 size={24} className="text-pink-400 mb-2" />
+              <h4 className="font-bold text-white mb-2">Social Media</h4>
+              <p className="text-xs text-gray-400 mb-4">Auto-publish to TikTok, Instagram, Facebook</p>
+              <div className="flex items-center gap-1 text-accent text-xs">
+                Publish <ArrowRight size={12} />
+              </div>
+            </Link>
+
+            {/* Marketing */}
+            <Link href="/marketing" className="card group hover:border-accent transition">
+              <Smartphone size={24} className="text-green-400 mb-2" />
+              <h4 className="font-bold text-white mb-2">Marketing</h4>
+              <p className="text-xs text-gray-400 mb-4">Create campaigns, ads, track ROI</p>
+              <div className="flex items-center gap-1 text-accent text-xs">
+                Create <ArrowRight size={12} />
               </div>
             </Link>
           </div>
@@ -645,58 +767,56 @@ export default function Dashboard() {
 
         {/* Help Section */}
         <div>
-          <h3 className="text-2xl font-bold text-white mb-6">Get Started</h3>
+          <h3 className="text-2xl font-bold text-white mb-6">Need Help?</h3>
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Setup Guide */}
+            {/* Help Card */}
             <Link href="/help" className="card bg-gradient-to-br from-blue-500/10 to-accent/10 border border-accent/30 group hover:border-accent transition">
               <BookOpen size={32} className="text-accent mb-3 group-hover:scale-110 transition" />
-              <h4 className="text-lg font-bold text-white mb-2">Setup Guide</h4>
-              <p className="text-sm text-gray-400 mb-4">
-                Complete guides on getting started and best practices.
-              </p>
-              <div className="flex items-center gap-2 text-accent text-sm font-semibold">
-                Read Guide <ArrowRight size={16} />
-              </div>
-            </Link>
-
-            {/* Documentation */}
-            <Link href="/docs" className="card bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/30 group hover:border-accent transition">
-              <LinkIcon size={32} className="text-purple-400 mb-3 group-hover:scale-110 transition" />
               <h4 className="text-lg font-bold text-white mb-2">Documentation</h4>
               <p className="text-sm text-gray-400 mb-4">
-                API docs, integration guides, and troubleshooting.
+                Complete guides on getting started, setup, and best practices.
               </p>
               <div className="flex items-center gap-2 text-accent text-sm font-semibold">
-                Explore <ArrowRight size={16} />
+                Read Guides <ArrowRight size={16} />
               </div>
             </Link>
 
-            {/* Support */}
-            <a href="mailto:support@dropboard.com" className="card bg-gradient-to-br from-orange-500/10 to-red-500/10 border border-orange-500/30 group hover:border-accent transition cursor-pointer">
-              <Flame size={32} className="text-orange-400 mb-3 group-hover:scale-110 transition" />
-              <h4 className="text-lg font-bold text-white mb-2">Support</h4>
+            {/* Suppliers Card */}
+            <Link href="/suppliers" className="card bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/30 group hover:border-accent transition">
+              <Package size={32} className="text-purple-400 mb-3 group-hover:scale-110 transition" />
+              <h4 className="text-lg font-bold text-white mb-2">Suppliers</h4>
               <p className="text-sm text-gray-400 mb-4">
-                Have questions? Contact our support team.
+                Manage your suppliers and integrate with fulfillment platforms.
               </p>
               <div className="flex items-center gap-2 text-accent text-sm font-semibold">
-                Contact <ArrowRight size={16} />
+                Manage <ArrowRight size={16} />
               </div>
-            </a>
+            </Link>
+
+            {/* Settings Card */}
+            <Link href="/settings" className="card bg-gradient-to-br from-orange-500/10 to-red-500/10 border border-orange-500/30 group hover:border-accent transition">
+              <Settings size={32} className="text-orange-400 mb-3 group-hover:scale-110 transition" />
+              <h4 className="text-lg font-bold text-white mb-2">Settings</h4>
+              <p className="text-sm text-gray-400 mb-4">
+                Configure automations, notifications, and API integrations.
+              </p>
+              <div className="flex items-center gap-2 text-accent text-sm font-semibold">
+                Configure <ArrowRight size={16} />
+              </div>
+            </Link>
           </div>
         </div>
 
         {/* Empty State */}
         {orders.length === 0 && products.length === 0 && (
-          <div className="card text-center py-12 bg-gradient-to-br from-gray-800/50 to-gray-900/50">
+          <div className="card text-center py-12">
             <Package size={48} className="mx-auto text-gray-600 mb-4" />
             <h3 className="text-xl font-bold text-white mb-2">Ready to get started?</h3>
-            <p className="text-gray-400 mb-6">
-              Connect your integrations and add your first product to begin automating.
-            </p>
+            <p className="text-gray-400 mb-6">Add your first product and order to see your dashboard come alive</p>
             <div className="flex gap-4 justify-center flex-wrap">
-              <Link href="/integrations" className="btn btn-primary flex items-center gap-2">
-                <Zap size={16} />
-                Connect Integrations
+              <Link href="/trending" className="btn btn-primary flex items-center gap-2">
+                <Flame size={16} />
+                Find Trending Products
               </Link>
               <Link href="/products" className="btn btn-secondary flex items-center gap-2">
                 <Plus size={16} />
@@ -704,7 +824,7 @@ export default function Dashboard() {
               </Link>
               <Link href="/help" className="btn btn-secondary flex items-center gap-2">
                 <BookOpen size={16} />
-                Learn More
+                Read Guide
               </Link>
             </div>
           </div>
