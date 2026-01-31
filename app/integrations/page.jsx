@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, LogOut, Settings, Check, AlertCircle, Eye, EyeOff, Loader } from 'lucide-react';
+import { ArrowLeft, LogOut, Check, AlertCircle, Eye, EyeOff, Loader, Info } from 'lucide-react';
 import { getUser, getToken } from '@/lib/auth';
 
 const INTEGRATIONS = [
@@ -18,14 +18,14 @@ const INTEGRATIONS = [
         name: 'Client ID', 
         key: 'clientId', 
         type: 'text', 
-        placeholder: 'Your Printful Client ID',
+        placeholder: '86b2a192758c2d8db39495f7df14fef3',
         help: 'Get from: Printful Dashboard → Apps → Your App → Credentials'
       },
       { 
         name: 'Client Secret', 
         key: 'clientSecret', 
         type: 'password', 
-        placeholder: 'Your Printful Client Secret',
+        placeholder: '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',
         help: 'Get from: Printful Dashboard → Apps → Your App → Credentials'
       },
     ],
@@ -43,18 +43,18 @@ const INTEGRATIONS = [
         name: 'Client Key', 
         key: 'clientKey', 
         type: 'text', 
-        placeholder: 'Your TikTok Client Key',
+        placeholder: 'awlp8674jr02y4b4',
         help: 'Get from: TikTok Developers → Your App → App details → Credentials'
       },
       { 
         name: 'Client Secret', 
         key: 'clientSecret', 
         type: 'password', 
-        placeholder: 'Your TikTok Client Secret',
+        placeholder: 'Q4a7y962CyIAmbcNNZi43GlKOckTTj1L',
         help: 'Get from: TikTok Developers → Your App → App details → Credentials'
       },
       { 
-        name: 'Redirect URI', 
+        name: 'Redirect URI (Optional)', 
         key: 'redirectUri', 
         type: 'text', 
         placeholder: 'https://yoursite.com/api/auth/tiktok/callback',
@@ -75,18 +75,18 @@ const INTEGRATIONS = [
         name: 'Store URL', 
         key: 'storeUrl', 
         type: 'text', 
-        placeholder: 'your-store.myshopify.com',
-        help: 'Your Shopify store domain'
+        placeholder: 'dropshipwithmonk.myshopify.com',
+        help: 'Your Shopify store domain (WITHOUT https://)'
       },
       { 
         name: 'Access Token', 
         key: 'accessToken', 
         type: 'password', 
-        placeholder: 'Your Shopify Access Token',
-        help: 'Get from: Shopify Admin → Settings → Apps and integrations → Develop apps'
+        placeholder: 'shpat_xxxxxxxxxxxxxxxxxxxxxxxx',
+        help: 'Get from: Shopify Admin → Settings → Apps and integrations → Develop apps → API credentials'
       },
     ],
-    docs: 'https://shopify.dev/docs/admin-api/graphql',
+    docs: 'https://shopify.dev/docs/admin-api/rest/reference',
     status: 'disconnected',
   },
   {
@@ -233,6 +233,7 @@ export default function Integrations() {
   const [loading, setLoading] = useState({});
   const [formData, setFormData] = useState({});
   const [showKeys, setShowKeys] = useState({});
+  const [detailedError, setDetailedError] = useState('');
 
   useEffect(() => {
     setMounted(true);
@@ -271,12 +272,16 @@ export default function Integrations() {
     const integration = integrations.find(i => i.id === integrationId);
     const data = formData[integrationId] || {};
 
-    if (integration.fields.some(field => !data[field.key])) {
-      setNotification('❌ Please fill in all fields');
+    // Check required fields
+    const requiredFields = integration.fields.filter(f => f.name !== 'Redirect URI (Optional)');
+    if (requiredFields.some(field => !data[field.key])) {
+      setNotification('❌ Please fill in all required fields');
       return;
     }
 
     setLoading({ ...loading, [integrationId]: true });
+    setDetailedError('');
+    
     try {
       const response = await fetch(`/api/integrations/${integrationId}/validate`, {
         method: 'POST',
@@ -286,9 +291,9 @@ export default function Integrations() {
         body: JSON.stringify(data),
       });
 
-      if (response.ok) {
-        const result = await response.json();
-        
+      const result = await response.json();
+
+      if (response.ok && result.success) {
         const saved = JSON.parse(localStorage.getItem('integrations') || '{}');
         saved[integrationId] = result.credentials || data;
         localStorage.setItem('integrations', JSON.stringify(saved));
@@ -309,12 +314,15 @@ export default function Integrations() {
         setNotification(`✅ ${integration.name} connected successfully!`);
         setTimeout(() => setNotification(''), 3000);
       } else {
-        const error = await response.json();
-        setNotification(`❌ ${error.error || 'Connection failed'}`);
+        const errorMessage = result.error || 'Connection failed';
+        setNotification(`❌ ${errorMessage}`);
+        setDetailedError(errorMessage);
       }
     } catch (error) {
       console.error('Connection error:', error);
-      setNotification('❌ Connection failed. Try again later.');
+      const errorMsg = error.message || 'Unknown error';
+      setNotification(`❌ Connection failed: ${errorMsg}`);
+      setDetailedError(`Error details: ${errorMsg}`);
     } finally {
       setLoading({ ...loading, [integrationId]: false });
     }
@@ -338,6 +346,7 @@ export default function Integrations() {
       });
       setIntegrations(updated);
       setNotification('✅ Integration disconnected');
+      setDetailedError('');
       setTimeout(() => setNotification(''), 3000);
     } catch (error) {
       console.error('Error disconnecting:', error);
@@ -391,13 +400,16 @@ export default function Integrations() {
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
         {/* Notification */}
         {notification && (
-          <div className={`p-4 rounded-lg flex items-center gap-2 ${
+          <div className={`p-4 rounded-lg flex items-start gap-3 ${
             notification.includes('✅')
               ? 'bg-green-500/10 border border-green-500/30 text-green-400'
               : 'bg-red-500/10 border border-red-500/30 text-red-400'
           }`}>
-            {notification.includes('✅') ? <Check size={20} /> : <AlertCircle size={20} />}
-            {notification}
+            {notification.includes('✅') ? <Check size={20} className="mt-0.5" /> : <AlertCircle size={20} className="mt-0.5" />}
+            <div>
+              <p>{notification}</p>
+              {detailedError && <p className="text-xs mt-2 opacity-90">{detailedError}</p>}
+            </div>
           </div>
         )}
 
@@ -538,22 +550,26 @@ export default function Integrations() {
 
         {/* Summary Card */}
         <div className="card bg-gradient-to-br from-accent/10 to-blue-500/10 border border-accent/30">
-          <h3 className="text-lg font-bold text-white mb-4">🚀 Setup Checklist</h3>
+          <h3 className="text-lg font-bold text-white mb-4">🚀 Quick Start</h3>
           <div className="grid md:grid-cols-2 gap-4 text-sm">
             <div>
-              <p className="font-semibold text-white mb-2">Essential APIs:</p>
-              <ul className="text-gray-400 space-y-2">
-                <li className={connected >= 1 ? '✅ text-green-400' : '⭕'}>Printful (Products)</li>
-                <li className={connected >= 2 ? '✅ text-green-400' : '⭕'}>Stripe (Payments)</li>
-                <li className={connected >= 3 ? '✅ text-green-400' : '⭕'}>TikTok (Social)</li>
-              </ul>
+              <p className="font-semibold text-white mb-2 flex items-center gap-2">
+                <Info size={16} />
+                Your Credentials:
+              </p>
+              <div className="bg-gray-800/50 rounded p-3 space-y-2 font-mono text-xs text-gray-300">
+                <p><span className="text-gray-500">Shopify Store:</span> dropshipwithmonk.myshopify.com</p>
+                <p><span className="text-gray-500">Shopify Client ID:</span> 86b2a192758c2d8db39495f7df14fef3</p>
+                <p><span className="text-gray-500">TikTok Client Key:</span> awlp8674jr02y4b4</p>
+              </div>
             </div>
             <div>
-              <p className="font-semibold text-white mb-2">What happens when connected:</p>
+              <p className="font-semibold text-white mb-2">Troubleshooting:</p>
               <ul className="text-gray-400 space-y-2 list-disc list-inside">
-                <li>Trending products auto-populate</li>
-                <li>Social publishing activates</li>
-                <li>Orders sync automatically</li>
+                <li>Double-check credentials copy/paste</li>
+                <li>No extra spaces before/after</li>
+                <li>Check browser console for errors</li>
+                <li>Verify API keys are active</li>
               </ul>
             </div>
           </div>
