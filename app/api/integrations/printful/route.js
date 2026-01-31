@@ -5,39 +5,33 @@ export async function POST(request) {
     const body = await request.json();
     const { apiToken } = body;
 
-    console.log('[Printful Validator] Testing API Token...');
-
     if (!apiToken) {
       return NextResponse.json(
-        { 
-          success: false, 
-          error: 'API Token is required' 
-        },
+        { success: false, error: 'API Token is required' },
         { status: 400 }
       );
     }
 
-    // Test Printful API
+    // Test with Printful API
     const response = await fetch('https://api.v2.printful.com/orders', {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
       },
     });
-
-    console.log('[Printful Validator] Response:', response.status);
 
     if (!response.ok) {
       return NextResponse.json(
         { 
           success: false, 
-          error: 'Invalid API Token. Please check your Printful API Token.' 
+          error: response.status === 401 
+            ? 'Invalid API Token' 
+            : `API Error: ${response.status}`
         },
         { status: 401 }
       );
     }
-
-    console.log('[Printful Validator] ✅ API Token valid!');
 
     return NextResponse.json({
       success: true,
@@ -48,12 +42,9 @@ export async function POST(request) {
     });
 
   } catch (error) {
-    console.error('[Printful Validator] Error:', error.message);
+    console.error('Printful validator error:', error);
     return NextResponse.json(
-      { 
-        success: false, 
-        error: `Validation failed: ${error.message}` 
-      },
+      { success: false, error: 'Validation failed' },
       { status: 500 }
     );
   }
