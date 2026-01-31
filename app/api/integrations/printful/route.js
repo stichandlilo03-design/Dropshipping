@@ -6,6 +6,7 @@ export async function POST(request) {
     const { apiToken } = data;
 
     console.log('Printful API Token validation received');
+    console.log('Token length:', apiToken?.length);
 
     if (!apiToken) {
       return NextResponse.json(
@@ -35,10 +36,11 @@ export async function POST(request) {
 
     const responseText = await response.text();
     console.log('Response length:', responseText.length);
+    console.log('Response:', responseText);
 
     if (!responseText || responseText.trim().length === 0) {
       return NextResponse.json(
-        { error: 'Empty response from Printful. Token may be invalid.' },
+        { error: 'Empty response from Printful. Token may be invalid or expired.' },
         { status: 401 }
       );
     }
@@ -47,6 +49,7 @@ export async function POST(request) {
     try {
       result = JSON.parse(responseText);
       console.log('Response parsed successfully');
+      console.log('Result:', result);
     } catch (e) {
       console.error('Parse error:', e);
       return NextResponse.json(
@@ -56,22 +59,49 @@ export async function POST(request) {
     }
 
     if (!response.ok) {
-      const errorMsg = result?.error || result?.result || 'Authentication failed';
-      console.error('API error:', errorMsg);
+      console.error('Response not OK:', response.status);
+      console.error('Result object:', JSON.stringify(result));
+      
+      // Extract error message from various possible formats
+      let errorMsg = 'Authentication failed';
+      
+      if (result.error) {
+        if (typeof result.error === 'string') {
+          errorMsg = result.error;
+        } else if (typeof result.error === 'object') {
+          if (result.error.message) {
+            errorMsg = result.error.message;
+          } else if (result.error.reason) {
+            errorMsg = result.error.reason;
+          } else {
+            errorMsg = 'Invalid token or access denied';
+          }
+        }
+      } else if (result.result && typeof result.result === 'string') {
+        errorMsg = result.result;
+      }
+      
+      console.log('Final error message:', errorMsg);
+      
       return NextResponse.json(
         { error: `Printful Error: ${errorMsg}` },
         { status: response.status }
       );
     }
 
-    if (result.code !== 200) {
+    // Check Printful response code
+    if (result.code && result.code !== 200) {
+      console.error('Printful code not 200:', result.code);
+      const msg = result.result || result.message || 'Unknown error';
       return NextResponse.json(
-        { error: result.result || `Error code ${result.code}` },
+        { error: `Printful Error: ${msg}` },
         { status: 400 }
       );
     }
 
+    // Check if we have stores
     if (!result.result || !Array.isArray(result.result) || result.result.length === 0) {
+      console.error('No stores in response');
       return NextResponse.json(
         { error: 'No stores found. Create a store in Printful Dashboard first.' },
         { status: 400 }
@@ -94,6 +124,7 @@ export async function POST(request) {
 
   } catch (error) {
     console.error('Fatal error:', error);
+    console.error('Error message:', error.message);
     return NextResponse.json(
       { error: `Server error: ${error.message}` },
       { status: 500 }
