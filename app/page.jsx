@@ -9,6 +9,7 @@ import { auth } from '@/lib/firebase';
 import { signOut } from 'firebase/auth';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db as firebaseDb } from '@/lib/firebase';
+import { fetchTrendingProducts } from '@/lib/trending';
 
 export default function Dashboard() {
   const router = useRouter();
@@ -17,6 +18,7 @@ export default function Dashboard() {
   const [products, setProducts] = useState([]);
   const [integrations, setIntegrations] = useState({});
   const [trendingProducts, setTrendingProducts] = useState([]);
+  const [trendingLoading, setTrendingLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [featureStatus, setFeatureStatus] = useState({});
   const [stats, setStats] = useState({
@@ -113,31 +115,34 @@ export default function Dashboard() {
         setFeatureStatus({});
       }
 
-      // Load trending products from real API
-      try {
-        console.log('[Dashboard] 📥 Fetching trending products...');
-        const response = await fetch('/api/trending', {
-          headers: {
-            'x-user-id': userId,
-          },
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          console.log('[Dashboard] ✅ Got trending products:', data.products?.length);
-          setTrendingProducts(data.products || []);
-        } else {
-          console.log('[Dashboard] ⚠️ Trending API returned:', response.status);
-          setTrendingProducts([]);
-        }
-      } catch (trendingError) {
-        console.error('[Dashboard] ❌ Error loading trending:', trendingError);
-        setTrendingProducts([]);
-      }
+      // Load trending products using CLIENT-SIDE function
+      await loadTrendingProducts(userId);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadTrendingProducts = async (userId) => {
+    try {
+      console.log('[Dashboard] 📥 Fetching trending products...');
+      setTrendingLoading(true);
+      
+      const result = await fetchTrendingProducts(userId);
+      
+      if (result.success) {
+        console.log('[Dashboard] ✅ Got trending products:', result.products.length);
+        setTrendingProducts(result.products);
+      } else {
+        console.error('[Dashboard] ❌ Error:', result.error);
+        setTrendingProducts([]);
+      }
+    } catch (error) {
+      console.error('[Dashboard] ❌ Error loading trending:', error);
+      setTrendingProducts([]);
+    } finally {
+      setTrendingLoading(false);
     }
   };
 
@@ -594,7 +599,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Trending Products Section - WITH REAL DATA */}
+        {/* Trending Products Section - NOW WITH CLIENT-SIDE DATA */}
         {featureStatus.trendingProducts?.available ? (
           <div>
             <div className="flex items-center justify-between mb-6">
@@ -607,7 +612,12 @@ export default function Dashboard() {
               </Link>
             </div>
             
-            {trendingProducts.length > 0 ? (
+            {trendingLoading ? (
+              <div className="card bg-orange-500/5 border border-orange-500/20 text-center py-8">
+                <div className="w-8 h-8 border-4 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                <p className="text-gray-400">Loading trending products...</p>
+              </div>
+            ) : trendingProducts.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {trendingProducts.slice(0, 3).map((product, idx) => (
                   <div key={product.id} className="card bg-gradient-to-br from-orange-500/10 to-red-500/10 border border-orange-500/30 group hover:border-accent transition">
@@ -659,7 +669,8 @@ export default function Dashboard() {
             ) : (
               <div className="card bg-orange-500/5 border border-orange-500/20 text-center py-8">
                 <Flame size={32} className="mx-auto text-orange-400 mb-2" />
-                <p className="text-gray-400">Loading trending products...</p>
+                <p className="text-gray-400">No trending products at the moment</p>
+                <p className="text-xs text-gray-500 mt-1">Make sure Printful and Shopify are connected</p>
               </div>
             )}
           </div>
