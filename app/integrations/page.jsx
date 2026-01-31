@@ -18,14 +18,14 @@ const INTEGRATIONS = [
         name: 'Client ID', 
         key: 'clientId', 
         type: 'text', 
-        placeholder: '86b2a192758c2d8db39495f7df14fef3',
+        placeholder: 'app-6260333',
         help: 'Get from: Printful Dashboard → Apps → Your App → Credentials'
       },
       { 
-        name: 'Client Secret', 
+        name: 'Secret Key', 
         key: 'clientSecret', 
         type: 'password', 
-        placeholder: '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',
+        placeholder: 'Og0yW9XwuRlHt0...',
         help: 'Get from: Printful Dashboard → Apps → Your App → Credentials'
       },
     ],
@@ -53,13 +53,6 @@ const INTEGRATIONS = [
         placeholder: 'Q4a7y962CyIAmbcNNZi43GlKOckTTj1L',
         help: 'Get from: TikTok Developers → Your App → App details → Credentials'
       },
-      { 
-        name: 'Redirect URI (Optional)', 
-        key: 'redirectUri', 
-        type: 'text', 
-        placeholder: 'https://yoursite.com/api/auth/tiktok/callback',
-        help: 'Must match URI in TikTok app settings'
-      },
     ],
     docs: 'https://developers.tiktok.com/doc/content-posting-api-reference-direct-post',
     status: 'disconnected',
@@ -75,7 +68,7 @@ const INTEGRATIONS = [
         name: 'Store URL', 
         key: 'storeUrl', 
         type: 'text', 
-        placeholder: 'dropshipwithmonk.myshopify.com',
+        placeholder: 'your-store.myshopify.com',
         help: 'Your Shopify store domain (WITHOUT https://)'
       },
       { 
@@ -114,113 +107,6 @@ const INTEGRATIONS = [
     docs: 'https://stripe.com/docs/keys',
     status: 'disconnected',
   },
-  {
-    id: 'instagram',
-    name: 'Instagram Shop',
-    icon: '📷',
-    category: 'Social Commerce',
-    description: 'Create shoppable posts on Instagram',
-    fields: [
-      { 
-        name: 'Business Account ID', 
-        key: 'businessAccountId', 
-        type: 'text', 
-        placeholder: 'Your Instagram Business Account ID',
-        help: 'Get from: Meta Business Suite → Settings → Instagram Accounts'
-      },
-      { 
-        name: 'Access Token', 
-        key: 'accessToken', 
-        type: 'password', 
-        placeholder: 'Your Instagram Access Token',
-        help: 'Get from: Meta for Developers → Your App → Tools → Access Token'
-      },
-    ],
-    docs: 'https://developers.facebook.com/docs/instagram-api',
-    status: 'disconnected',
-  },
-  {
-    id: 'facebook',
-    name: 'Facebook Shop',
-    icon: '👍',
-    category: 'Social Commerce',
-    description: 'Set up Facebook Shop for product sales',
-    fields: [
-      { 
-        name: 'Page ID', 
-        key: 'pageId', 
-        type: 'text', 
-        placeholder: 'Your Facebook Page ID',
-        help: 'Get from: Facebook Page → About → Page ID'
-      },
-      { 
-        name: 'Access Token', 
-        key: 'accessToken', 
-        type: 'password', 
-        placeholder: 'Your Facebook Access Token',
-        help: 'Get from: Meta for Developers → Your App → Tools → Access Token'
-      },
-    ],
-    docs: 'https://developers.facebook.com/docs/facebook-shop',
-    status: 'disconnected',
-  },
-  {
-    id: 'spocket',
-    name: 'Spocket',
-    icon: '🌍',
-    category: 'Dropshipping',
-    description: 'Connect verified US and EU suppliers',
-    fields: [
-      { 
-        name: 'API Key', 
-        key: 'apiKey', 
-        type: 'password', 
-        placeholder: 'Your Spocket API Key',
-        help: 'Get from: Spocket Dashboard → Settings → API Keys'
-      },
-    ],
-    docs: 'https://app.spocket.co/api',
-    status: 'disconnected',
-  },
-  {
-    id: 'gmail-smtp',
-    name: 'Gmail / SMTP',
-    icon: '📧',
-    category: 'Email Marketing',
-    description: 'Send emails through Gmail, Outlook, or custom SMTP',
-    fields: [
-      { 
-        name: 'Email Address', 
-        key: 'emailAddress', 
-        type: 'email', 
-        placeholder: 'your-email@gmail.com',
-        help: 'Your email address for sending'
-      },
-      { 
-        name: 'SMTP Host', 
-        key: 'smtpHost', 
-        type: 'text', 
-        placeholder: 'smtp.gmail.com',
-        help: 'SMTP server (smtp.gmail.com, smtp-mail.outlook.com, etc)'
-      },
-      { 
-        name: 'SMTP Port', 
-        key: 'smtpPort', 
-        type: 'text', 
-        placeholder: '587',
-        help: 'Usually 587 (TLS) or 465 (SSL)'
-      },
-      { 
-        name: 'App Password', 
-        key: 'appPassword', 
-        type: 'password', 
-        placeholder: 'Your app-specific password',
-        help: 'For Gmail: Enable 2FA and create app password'
-      },
-    ],
-    docs: 'https://support.google.com/accounts/answer/185833',
-    status: 'disconnected',
-  },
 ];
 
 export default function Integrations() {
@@ -233,7 +119,6 @@ export default function Integrations() {
   const [loading, setLoading] = useState({});
   const [formData, setFormData] = useState({});
   const [showKeys, setShowKeys] = useState({});
-  const [detailedError, setDetailedError] = useState('');
 
   useEffect(() => {
     setMounted(true);
@@ -273,16 +158,18 @@ export default function Integrations() {
     const data = formData[integrationId] || {};
 
     // Check required fields
-    const requiredFields = integration.fields.filter(f => f.name !== 'Redirect URI (Optional)');
+    const requiredFields = integration.fields.filter(f => !f.name.includes('Optional'));
     if (requiredFields.some(field => !data[field.key])) {
       setNotification('❌ Please fill in all required fields');
       return;
     }
 
     setLoading({ ...loading, [integrationId]: true });
-    setDetailedError('');
     
     try {
+      console.log(`[${integrationId}] Sending request to API...`);
+      console.log(`[${integrationId}] Payload:`, data);
+
       const response = await fetch(`/api/integrations/${integrationId}/validate`, {
         method: 'POST',
         headers: {
@@ -291,8 +178,46 @@ export default function Integrations() {
         body: JSON.stringify(data),
       });
 
-      const result = await response.json();
+      console.log(`[${integrationId}] Response status:`, response.status);
+      console.log(`[${integrationId}] Response headers:`, {
+        contentType: response.headers.get('content-type'),
+        contentLength: response.headers.get('content-length'),
+      });
 
+      // Get response as text first
+      const responseText = await response.text();
+      console.log(`[${integrationId}] Response text length:`, responseText.length);
+      console.log(`[${integrationId}] Response text (first 200 chars):`, responseText.substring(0, 200));
+
+      // Check if response is empty
+      if (!responseText || responseText.trim().length === 0) {
+        console.error(`[${integrationId}] Empty response from API`);
+        setNotification(`❌ Empty response from server. Check server logs.`);
+        setLoading({ ...loading, [integrationId]: false });
+        return;
+      }
+
+      // Try to parse as JSON
+      let result;
+      try {
+        result = JSON.parse(responseText);
+        console.log(`[${integrationId}] Parsed JSON successfully`);
+      } catch (parseError) {
+        console.error(`[${integrationId}] Failed to parse JSON:`, parseError);
+        console.error(`[${integrationId}] Response was:`, responseText);
+        
+        // Check if it's HTML (error page)
+        if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
+          setNotification(`❌ Server returned an error page. Check if the API endpoint exists.`);
+        } else {
+          setNotification(`❌ Invalid response from server: ${responseText.substring(0, 100)}`);
+        }
+        
+        setLoading({ ...loading, [integrationId]: false });
+        return;
+      }
+
+      // Check if response indicates success
       if (response.ok && result.success) {
         const saved = JSON.parse(localStorage.getItem('integrations') || '{}');
         saved[integrationId] = result.credentials || data;
@@ -314,15 +239,14 @@ export default function Integrations() {
         setNotification(`✅ ${integration.name} connected successfully!`);
         setTimeout(() => setNotification(''), 3000);
       } else {
-        const errorMessage = result.error || 'Connection failed';
+        // Handle error response
+        const errorMessage = result.error || result.message || 'Unknown error';
+        console.error(`[${integrationId}] Error response:`, result);
         setNotification(`❌ ${errorMessage}`);
-        setDetailedError(errorMessage);
       }
     } catch (error) {
-      console.error('Connection error:', error);
-      const errorMsg = error.message || 'Unknown error';
-      setNotification(`❌ Connection failed: ${errorMsg}`);
-      setDetailedError(`Error details: ${errorMsg}`);
+      console.error(`[${integrationId}] Fetch error:`, error);
+      setNotification(`❌ Connection failed: ${error.message}`);
     } finally {
       setLoading({ ...loading, [integrationId]: false });
     }
@@ -346,7 +270,6 @@ export default function Integrations() {
       });
       setIntegrations(updated);
       setNotification('✅ Integration disconnected');
-      setDetailedError('');
       setTimeout(() => setNotification(''), 3000);
     } catch (error) {
       console.error('Error disconnecting:', error);
@@ -406,15 +329,12 @@ export default function Integrations() {
               : 'bg-red-500/10 border border-red-500/30 text-red-400'
           }`}>
             {notification.includes('✅') ? <Check size={20} className="mt-0.5" /> : <AlertCircle size={20} className="mt-0.5" />}
-            <div>
-              <p>{notification}</p>
-              {detailedError && <p className="text-xs mt-2 opacity-90">{detailedError}</p>}
-            </div>
+            <p>{notification}</p>
           </div>
         )}
 
         {/* Categories */}
-        {['Print-on-Demand', 'Payment Processing', 'Social Commerce', 'Email Marketing', 'Dropshipping', 'Store Integration'].map(category => {
+        {['Print-on-Demand', 'Payment Processing', 'Social Commerce', 'Store Integration'].map(category => {
           const categoryIntegrations = integrations.filter(i => i.category === category);
           if (categoryIntegrations.length === 0) return null;
 
@@ -424,8 +344,6 @@ export default function Integrations() {
                 {category === 'Print-on-Demand' && '📦'}
                 {category === 'Payment Processing' && '💳'}
                 {category === 'Social Commerce' && '📱'}
-                {category === 'Email Marketing' && '📧'}
-                {category === 'Dropshipping' && '🌍'}
                 {category === 'Store Integration' && '🛍️'}
                 {category}
               </h2>
@@ -548,30 +466,17 @@ export default function Integrations() {
           );
         })}
 
-        {/* Summary Card */}
+        {/* Info Card */}
         <div className="card bg-gradient-to-br from-accent/10 to-blue-500/10 border border-accent/30">
-          <h3 className="text-lg font-bold text-white mb-4">🚀 Quick Start</h3>
-          <div className="grid md:grid-cols-2 gap-4 text-sm">
-            <div>
-              <p className="font-semibold text-white mb-2 flex items-center gap-2">
-                <Info size={16} />
-                Your Credentials:
-              </p>
-              <div className="bg-gray-800/50 rounded p-3 space-y-2 font-mono text-xs text-gray-300">
-                <p><span className="text-gray-500">Shopify Store:</span> dropshipwithmonk.myshopify.com</p>
-                <p><span className="text-gray-500">Shopify Client ID:</span> 86b2a192758c2d8db39495f7df14fef3</p>
-                <p><span className="text-gray-500">TikTok Client Key:</span> awlp8674jr02y4b4</p>
-              </div>
-            </div>
-            <div>
-              <p className="font-semibold text-white mb-2">Troubleshooting:</p>
-              <ul className="text-gray-400 space-y-2 list-disc list-inside">
-                <li>Double-check credentials copy/paste</li>
-                <li>No extra spaces before/after</li>
-                <li>Check browser console for errors</li>
-                <li>Verify API keys are active</li>
-              </ul>
-            </div>
+          <h3 className="text-lg font-bold text-white mb-4 flex items-center gap-2">
+            <Info size={20} />
+            Connection Tips
+          </h3>
+          <div className="space-y-2 text-sm text-gray-300">
+            <p>• Make sure your credentials are correct (no extra spaces)</p>
+            <p>• Check browser DevTools Console (F12) for error details</p>
+            <p>• If connection fails, reload the page and try again</p>
+            <p>• Your credentials are saved securely in localStorage</p>
           </div>
         </div>
       </div>
