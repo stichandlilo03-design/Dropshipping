@@ -15,18 +15,11 @@ const INTEGRATIONS = [
     description: 'Connect Printful for custom print products and fulfillment',
     fields: [
       { 
-        name: 'Client ID', 
-        key: 'clientId', 
-        type: 'text', 
-        placeholder: 'app-6260333',
-        help: 'Get from: Printful Dashboard → Apps → Your App → Credentials'
-      },
-      { 
-        name: 'Secret Key', 
-        key: 'clientSecret', 
+        name: 'API Token', 
+        key: 'apiToken', 
         type: 'password', 
-        placeholder: 'Og0yW9XwuRlHt0...',
-        help: 'Get from: Printful Dashboard → Apps → Your App → Credentials'
+        placeholder: '4tQzSCatHFK4n5uP0JklFjzB5hzccJK68CmSaVDXXLtRrhhT8vYyaqv7NxfZJDUd',
+        help: 'Get from: Printful Dashboard → Settings → API Tokens'
       },
     ],
     docs: 'https://developers.printful.com/docs',
@@ -483,4 +476,3 @@ export default function Integrations() {
     </div>
   );
 }
-
