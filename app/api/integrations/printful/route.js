@@ -5,7 +5,7 @@ export async function POST(request) {
     const data = await request.json();
     const { clientId, clientSecret } = data;
 
-    console.log('Printful OAuth 2.0 validation request received');
+    console.log('Printful token validation request received');
 
     if (!clientId || !clientSecret) {
       return NextResponse.json(
@@ -14,132 +14,83 @@ export async function POST(request) {
       );
     }
 
-    console.log('Exchanging credentials for OAuth 2.0 token...');
+    console.log('Using Bearer token authentication...');
 
-    // Step 1: Get OAuth 2.0 token
-    const tokenParams = new URLSearchParams();
-    tokenParams.append('client_id', clientId);
-    tokenParams.append('client_secret', clientSecret);
-    tokenParams.append('grant_type', 'client_credentials');
+    // Printful expects the SECRET as the Bearer token directly
+    // The clientId is just metadata, the clientSecret is the actual token
+    const token = clientSecret; // This IS the API token!
 
-    const tokenResponse = await fetch('https://www.printful.com/oauth/token', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: tokenParams.toString(),
-    });
+    console.log('Calling Printful API with Bearer token...');
 
-    console.log('OAuth token response status:', tokenResponse.status);
-
-    const tokenText = await tokenResponse.text();
-
-    if (!tokenText || tokenText.trim().length === 0) {
-      return NextResponse.json(
-        { error: 'Empty response from Printful OAuth endpoint' },
-        { status: 401 }
-      );
-    }
-
-    let tokenData;
-    try {
-      tokenData = JSON.parse(tokenText);
-      console.log('OAuth token response parsed');
-    } catch (e) {
-      console.error('Failed to parse token response:', e);
-      return NextResponse.json(
-        { error: 'Invalid response from Printful OAuth' },
-        { status: 500 }
-      );
-    }
-
-    if (!tokenResponse.ok) {
-      console.error('OAuth failed:', tokenData);
-      return NextResponse.json(
-        { error: tokenData.error_description || tokenData.error || 'OAuth authentication failed' },
-        { status: 401 }
-      );
-    }
-
-    if (!tokenData.access_token) {
-      console.error('No access token in response:', tokenData);
-      return NextResponse.json(
-        { error: 'No access token received from Printful' },
-        { status: 400 }
-      );
-    }
-
-    const accessToken = tokenData.access_token;
-    console.log('✅ OAuth token acquired:', accessToken.substring(0, 10) + '...');
-
-    // Step 2: Use token to get stores
-    console.log('Fetching stores with OAuth token...');
-
-    const storesResponse = await fetch('https://api.printful.com/stores', {
+    const response = await fetch('https://api.printful.com/stores', {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${accessToken}`,
+        'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
     });
 
-    console.log('Stores response status:', storesResponse.status);
+    console.log('Printful response status:', response.status);
 
-    const storesText = await storesResponse.text();
+    const responseText = await response.text();
+    console.log('Response length:', responseText.length);
+    console.log('Response first 200 chars:', responseText.substring(0, 200));
 
-    if (!storesText || storesText.trim().length === 0) {
+    if (!responseText || responseText.trim().length === 0) {
       return NextResponse.json(
-        { error: 'Empty response from stores endpoint' },
+        { error: 'Empty response from Printful. Check your token.' },
         { status: 401 }
       );
     }
 
-    let storesData;
+    let result;
     try {
-      storesData = JSON.parse(storesText);
-      console.log('Stores response parsed');
+      result = JSON.parse(responseText);
+      console.log('Response parsed as JSON');
     } catch (e) {
-      console.error('Failed to parse stores response:', e);
+      console.error('Failed to parse response:', e);
       return NextResponse.json(
-        { error: 'Invalid response from stores endpoint' },
+        { error: 'Invalid response from Printful' },
         { status: 500 }
       );
     }
 
-    if (!storesResponse.ok) {
-      console.error('Stores API failed:', storesData);
+    if (!response.ok) {
+      console.error('API returned error:', result);
+      const errorMsg = result?.error?.message || result?.error?.reason || result?.result || 'Authentication failed';
       return NextResponse.json(
-        { error: storesData.error || storesData.result || 'Failed to fetch stores' },
-        { status: storesResponse.status }
+        { error: `Printful Error: ${errorMsg}` },
+        { status: response.status }
       );
     }
 
-    if (storesData.code !== 200) {
+    // Printful returns { code, result }
+    if (result.code !== 200) {
+      console.error('Non-200 code:', result.code);
       return NextResponse.json(
-        { error: storesData.result || 'API error' },
+        { error: result.result || `Error code ${result.code}` },
         { status: 400 }
       );
     }
 
-    if (!storesData.result || !Array.isArray(storesData.result) || storesData.result.length === 0) {
-      console.error('No stores found:', storesData);
+    if (!result.result || !Array.isArray(result.result) || result.result.length === 0) {
+      console.error('No stores in response');
       return NextResponse.json(
-        { error: 'No stores found in your Printful account. Create a store first.' },
+        { error: 'No stores found. Create a store in Printful first.' },
         { status: 400 }
       );
     }
 
-    const store = storesData.result[0];
+    const store = result.result[0];
     console.log('✅ Store found:', store.name);
-    console.log('===== PRINTFUL OAUTH SUCCESS =====');
+    console.log('===== PRINTFUL VALIDATION SUCCESS =====');
 
     return NextResponse.json({
       success: true,
       message: `✅ Successfully connected to Printful store: ${store.name}!`,
       credentials: {
         clientId,
-        clientSecret: clientSecret.substring(0, 5) + '...' + clientSecret.substring(-5),
-        accessToken: accessToken.substring(0, 10) + '...',
+        token: token.substring(0, 10) + '...' + token.substring(-5),
         storeId: store.id,
         storeName: store.name,
         connectedAt: new Date().toISOString(),
