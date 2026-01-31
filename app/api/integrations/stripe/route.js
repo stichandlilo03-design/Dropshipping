@@ -5,24 +5,16 @@ export async function POST(request) {
     const body = await request.json();
     const { publishableKey, secretKey } = body;
 
-    console.log('[Stripe Validator] Testing Keys...');
-
     if (!publishableKey || !secretKey) {
       return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Publishable Key and Secret Key are required' 
-        },
+        { success: false, error: 'Both keys required' },
         { status: 400 }
       );
     }
 
     if (!publishableKey.startsWith('pk_') || !secretKey.startsWith('sk_')) {
       return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Invalid key format (pk_ and sk_)' 
-        },
+        { success: false, error: 'Invalid key format' },
         { status: 400 }
       );
     }
@@ -34,38 +26,25 @@ export async function POST(request) {
       },
     });
 
-    console.log('[Stripe Validator] Response:', response.status);
-
     if (!response.ok) {
       return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Invalid Secret Key' 
-        },
+        { success: false, error: 'Invalid Secret Key' },
         { status: 401 }
       );
     }
-
-    const keyType = secretKey.includes('_live_') ? 'Live' : 'Test';
-
-    console.log('[Stripe Validator] ✅ Valid! Key type:', keyType);
 
     return NextResponse.json({
       success: true,
       credentials: {
         provider: 'Stripe',
-        keyType: keyType,
+        keyType: secretKey.includes('_live_') ? 'Live' : 'Test',
         status: 'active',
       },
     });
 
   } catch (error) {
-    console.error('[Stripe Validator] Error:', error.message);
     return NextResponse.json(
-      { 
-        success: false, 
-        error: `Validation failed: ${error.message}` 
-      },
+      { success: false, error: 'Validation failed' },
       { status: 500 }
     );
   }
