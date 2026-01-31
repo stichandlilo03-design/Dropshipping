@@ -5,26 +5,19 @@ export async function POST(request) {
     const body = await request.json();
     const { storeUrl, accessToken } = body;
 
-    console.log('[Shopify Validator] Testing Store URL and Access Token...');
-
     if (!storeUrl || !accessToken) {
       return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Store URL and Access Token are required' 
-        },
+        { success: false, error: 'Store URL and Access Token required' },
         { status: 400 }
       );
     }
 
-    const normalizedUrl = storeUrl.includes('myshopify.com') 
+    const url = storeUrl.includes('myshopify.com') 
       ? storeUrl 
       : `${storeUrl}.myshopify.com`;
 
-    console.log('[Shopify Validator] Testing:', normalizedUrl);
-
     const response = await fetch(
-      `https://${normalizedUrl}/admin/api/2024-01/shop.json`,
+      `https://${url}/admin/api/2024-01/shop.json`,
       {
         method: 'GET',
         headers: {
@@ -33,21 +26,14 @@ export async function POST(request) {
       }
     );
 
-    console.log('[Shopify Validator] Response:', response.status);
-
     if (!response.ok) {
       return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Invalid Access Token or Store URL' 
-        },
+        { success: false, error: 'Invalid credentials' },
         { status: 401 }
       );
     }
 
     const data = await response.json();
-
-    console.log('[Shopify Validator] ✅ Valid! Shop:', data.shop?.name);
 
     return NextResponse.json({
       success: true,
@@ -59,12 +45,8 @@ export async function POST(request) {
     });
 
   } catch (error) {
-    console.error('[Shopify Validator] Error:', error.message);
     return NextResponse.json(
-      { 
-        success: false, 
-        error: `Validation failed: ${error.message}` 
-      },
+      { success: false, error: 'Validation failed' },
       { status: 500 }
     );
   }
