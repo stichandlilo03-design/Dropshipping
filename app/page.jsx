@@ -16,6 +16,7 @@ export default function Dashboard() {
   const [orders, setOrders] = useState([]);
   const [products, setProducts] = useState([]);
   const [integrations, setIntegrations] = useState({});
+  const [trendingProducts, setTrendingProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [featureStatus, setFeatureStatus] = useState({});
   const [stats, setStats] = useState({
@@ -111,6 +112,24 @@ export default function Dashboard() {
         setIntegrations({});
         setFeatureStatus({});
       }
+
+      // Load trending products from real API
+      try {
+        console.log('[Dashboard] 📥 Fetching trending products...');
+        const response = await fetch('/api/trending');
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('[Dashboard] ✅ Got trending products:', data.products?.length);
+          setTrendingProducts(data.products || []);
+        } else {
+          console.log('[Dashboard] ⚠️ Trending API returned:', response.status);
+          setTrendingProducts([]);
+        }
+      } catch (trendingError) {
+        console.error('[Dashboard] ❌ Error loading trending:', trendingError);
+        setTrendingProducts([]);
+      }
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -130,7 +149,6 @@ export default function Dashboard() {
 
     // Define feature dependencies
     const features = {
-      // Trending Products needs at least one store (Shopify or TikTok) + Printful for fulfillment
       trendingProducts: {
         required: ['printful', 'shopify'],
         optional: ['tiktok'],
@@ -138,7 +156,6 @@ export default function Dashboard() {
         missingAPIs: [],
       },
       
-      // Orders management needs Shopify or TikTok
       orders: {
         required: ['shopify'],
         optional: ['tiktok'],
@@ -146,7 +163,6 @@ export default function Dashboard() {
         missingAPIs: [],
       },
       
-      // Products management needs Shopify or TikTok
       products: {
         required: ['shopify'],
         optional: ['tiktok'],
@@ -154,7 +170,6 @@ export default function Dashboard() {
         missingAPIs: [],
       },
       
-      // Analytics needs orders (Shopify or TikTok)
       analytics: {
         required: ['shopify'],
         optional: ['tiktok'],
@@ -162,7 +177,6 @@ export default function Dashboard() {
         missingAPIs: [],
       },
       
-      // Social Media posting needs TikTok + optional Printful
       socialPublish: {
         required: ['tiktok'],
         optional: ['printful'],
@@ -170,7 +184,6 @@ export default function Dashboard() {
         missingAPIs: !connected[`tiktok`] ? ['TikTok'] : [],
       },
       
-      // Product Manager (bulk edit, URLs) needs Shopify or TikTok
       productManager: {
         required: ['shopify'],
         optional: ['tiktok'],
@@ -178,7 +191,6 @@ export default function Dashboard() {
         missingAPIs: [],
       },
       
-      // Marketing campaigns need Shopify for store data
       marketing: {
         required: ['shopify', 'stripe'],
         optional: ['tiktok'],
@@ -186,7 +198,6 @@ export default function Dashboard() {
         missingAPIs: [],
       },
       
-      // Payments/Revenue needs Stripe
       revenue: {
         required: ['stripe'],
         optional: [],
@@ -194,7 +205,6 @@ export default function Dashboard() {
         missingAPIs: !connected[`stripe`] ? ['Stripe'] : [],
       },
       
-      // Email notifications need Gmail
       emailNotifications: {
         required: ['gmail-smtp'],
         optional: [],
@@ -206,7 +216,6 @@ export default function Dashboard() {
     // Calculate missing APIs for each feature
     Object.keys(features).forEach(feature => {
       const required = features[feature].required;
-      const connectedRequired = required.filter(api => connected[api]);
       
       features[feature].missingAPIs = required
         .filter(api => !connected[api])
@@ -297,7 +306,7 @@ export default function Dashboard() {
     }
 
     if (totalOrders === 0) {
-      return `${timeGreeting}! Start by connecting integrations and adding your first product.`;
+      return `${timeGreeting}! Start by connecting integrations and discovering trending products.`;
     } else if (totalOrders < 10) {
       return `${timeGreeting}! You're building momentum with ${totalOrders} orders. Keep it up! 🚀`;
     } else if (totalOrders < 50) {
@@ -425,6 +434,13 @@ export default function Dashboard() {
             >
               <Download size={20} className="text-gray-400" />
             </button>
+            <Link
+              href="/integrations"
+              className="p-2 hover:bg-gray-700 rounded-lg transition"
+              title="Integrations"
+            >
+              <Zap size={20} className="text-gray-400" />
+            </Link>
             <Link
               href="/settings"
               className="p-2 hover:bg-gray-700 rounded-lg transition"
@@ -574,7 +590,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Trending Products Section - WITH API DETECTION */}
+        {/* Trending Products Section - WITH REAL DATA */}
         {featureStatus.trendingProducts?.available ? (
           <div>
             <div className="flex items-center justify-between mb-6">
@@ -583,88 +599,65 @@ export default function Dashboard() {
                 🔥 Trending Products
               </h3>
               <Link href="/trending" className="text-accent hover:text-emerald-400 font-semibold transition text-sm">
-                View All →
+                View All ({trendingProducts.length}) →
               </Link>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {/* Trending Product 1 */}
-              <div className="card bg-gradient-to-br from-orange-500/10 to-red-500/10 border border-orange-500/30 group hover:border-accent transition">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1">
-                    <p className="text-xs text-orange-400 font-bold">🔥 TRENDING #1</p>
-                    <h4 className="text-base font-bold text-white">Programmer Coffee T-Shirt</h4>
+            
+            {trendingProducts.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {trendingProducts.slice(0, 3).map((product, idx) => (
+                  <div key={product.id} className="card bg-gradient-to-br from-orange-500/10 to-red-500/10 border border-orange-500/30 group hover:border-accent transition">
+                    {product.image && (
+                      <div className="mb-3 -mx-4 -mt-4 h-32 overflow-hidden rounded-t-lg">
+                        <img
+                          src={product.image}
+                          alt={product.title}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            e.target.style.display = 'none';
+                          }}
+                        />
+                      </div>
+                    )}
+                    <div className="flex items-start justify-between mb-3">
+                      <div className="flex-1">
+                        <p className="text-xs text-orange-400 font-bold">🔥 #{idx + 1}</p>
+                        <h4 className="text-base font-bold text-white line-clamp-2">{product.title}</h4>
+                      </div>
+                      {product.views && (
+                        <span className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-2 py-1 rounded text-xs font-bold flex-shrink-0">
+                          {(product.views / 1000).toFixed(0)}K
+                        </span>
+                      )}
+                    </div>
+                    {product.description && (
+                      <p className="text-xs text-gray-400 mb-3 line-clamp-2">{product.description}</p>
+                    )}
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="text-xs text-gray-400">Supplier</p>
+                        <p className="text-sm font-bold text-accent">{product.supplier}</p>
+                      </div>
+                      {product.price && (
+                        <div className="text-right">
+                          <p className="text-xs text-gray-400">Price</p>
+                          <p className="text-sm font-bold text-white">${parseFloat(product.price).toFixed(2)}</p>
+                        </div>
+                      )}
+                    </div>
+                    <Link href="/trending" className="w-full btn btn-primary text-xs flex items-center justify-center gap-2 py-2">
+                      <Plus size={14} />
+                      View & Add
+                    </Link>
                   </div>
-                  <span className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-2 py-1 rounded text-xs font-bold">9.2/10</span>
-                </div>
-                <p className="text-xs text-gray-400 mb-3">Perfect for developers</p>
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <p className="text-xs text-gray-400">Est. Sales</p>
-                    <p className="text-sm font-bold text-white">500+</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-gray-400">Margin</p>
-                    <p className="text-sm font-bold text-green-400">58%</p>
-                  </div>
-                </div>
-                <Link href="/trending" className="w-full btn btn-primary text-xs flex items-center justify-center gap-2 py-2">
-                  <Plus size={14} />
-                  Add to Store
-                </Link>
+                ))}
               </div>
-
-              {/* Trending Product 2 */}
-              <div className="card bg-gradient-to-br from-pink-500/10 to-purple-500/10 border border-pink-500/30 group hover:border-accent transition">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1">
-                    <p className="text-xs text-pink-400 font-bold">🔥 TRENDING #2</p>
-                    <h4 className="text-base font-bold text-white">Dog Mom Hoodie</h4>
-                  </div>
-                  <span className="bg-gradient-to-r from-pink-500 to-purple-500 text-white px-2 py-1 rounded text-xs font-bold">8.7/10</span>
-                </div>
-                <p className="text-xs text-gray-400 mb-3">For dog lovers</p>
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <p className="text-xs text-gray-400">Est. Sales</p>
-                    <p className="text-sm font-bold text-white">800+</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-gray-400">Margin</p>
-                    <p className="text-sm font-bold text-green-400">62%</p>
-                  </div>
-                </div>
-                <Link href="/trending" className="w-full btn btn-primary text-xs flex items-center justify-center gap-2 py-2">
-                  <Plus size={14} />
-                  Add to Store
-                </Link>
+            ) : (
+              <div className="card bg-orange-500/5 border border-orange-500/20 text-center py-8">
+                <Flame size={32} className="mx-auto text-orange-400 mb-2" />
+                <p className="text-gray-400">Loading trending products...</p>
               </div>
-
-              {/* Trending Product 3 */}
-              <div className="card bg-gradient-to-br from-green-500/10 to-teal-500/10 border border-green-500/30 group hover:border-accent transition">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1">
-                    <p className="text-xs text-green-400 font-bold">🔥 TRENDING #3</p>
-                    <h4 className="text-base font-bold text-white">Yoga Zen Mug</h4>
-                  </div>
-                  <span className="bg-gradient-to-r from-green-500 to-teal-500 text-white px-2 py-1 rounded text-xs font-bold">8.1/10</span>
-                </div>
-                <p className="text-xs text-gray-400 mb-3">Perfect for yoga lovers</p>
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <p className="text-xs text-gray-400">Est. Sales</p>
-                    <p className="text-sm font-bold text-white">1,200+</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-xs text-gray-400">Margin</p>
-                    <p className="text-sm font-bold text-green-400">64%</p>
-                  </div>
-                </div>
-                <Link href="/trending" className="w-full btn btn-primary text-xs flex items-center justify-center gap-2 py-2">
-                  <Plus size={14} />
-                  Add to Store
-                </Link>
-              </div>
-            </div>
+            )}
           </div>
         ) : (
           <div className="card bg-yellow-500/10 border border-yellow-500/30">
@@ -890,107 +883,20 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Business Tools Section */}
-        <div>
-          <h3 className="text-2xl font-bold text-white mb-6">💼 Business Tools</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <FeatureCard
-              feature="productManager"
-              href="/products-manager"
-              locked={!featureStatus.productManager?.available}
-              missingAPIs={featureStatus.productManager?.missingAPIs}
-            >
-              <LinkIcon size={24} className="text-blue-400 mb-2" />
-              <h4 className="font-bold text-white mb-2">Product Manager</h4>
-              <p className="text-xs text-gray-400 mb-4">Manage URLs, direct links for ads, bulk edit products</p>
-              <div className="flex items-center gap-1 text-accent text-xs">
-                Manage <ArrowRight size={12} />
-              </div>
-            </FeatureCard>
-
-            <FeatureCard
-              feature="socialPublish"
-              href="/social-publish"
-              locked={!featureStatus.socialPublish?.available}
-              missingAPIs={featureStatus.socialPublish?.missingAPIs}
-            >
-              <Share2 size={24} className="text-pink-400 mb-2" />
-              <h4 className="font-bold text-white mb-2">Social Media</h4>
-              <p className="text-xs text-gray-400 mb-4">Auto-publish to TikTok, Instagram, Facebook</p>
-              <div className="flex items-center gap-1 text-accent text-xs">
-                Publish <ArrowRight size={12} />
-              </div>
-            </FeatureCard>
-
-            <FeatureCard
-              feature="marketing"
-              href="/marketing"
-              locked={!featureStatus.marketing?.available}
-              missingAPIs={featureStatus.marketing?.missingAPIs}
-            >
-              <Smartphone size={24} className="text-green-400 mb-2" />
-              <h4 className="font-bold text-white mb-2">Marketing</h4>
-              <p className="text-xs text-gray-400 mb-4">Create campaigns, ads, track ROI</p>
-              <div className="flex items-center gap-1 text-accent text-xs">
-                Create <ArrowRight size={12} />
-              </div>
-            </FeatureCard>
-          </div>
-        </div>
-
-        {/* Help Section */}
-        <div>
-          <h3 className="text-2xl font-bold text-white mb-6">Need Help?</h3>
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <Link href="/help" className="card bg-gradient-to-br from-blue-500/10 to-accent/10 border border-accent/30 group hover:border-accent transition">
-              <BookOpen size={32} className="text-accent mb-3 group-hover:scale-110 transition" />
-              <h4 className="text-lg font-bold text-white mb-2">Documentation</h4>
-              <p className="text-sm text-gray-400 mb-4">
-                Complete guides on getting started, setup, and best practices.
-              </p>
-              <div className="flex items-center gap-2 text-accent text-sm font-semibold">
-                Read Guides <ArrowRight size={16} />
-              </div>
-            </Link>
-
-            <Link href="/suppliers" className="card bg-gradient-to-br from-purple-500/10 to-pink-500/10 border border-purple-500/30 group hover:border-accent transition">
-              <Package size={32} className="text-purple-400 mb-3 group-hover:scale-110 transition" />
-              <h4 className="text-lg font-bold text-white mb-2">Suppliers</h4>
-              <p className="text-sm text-gray-400 mb-4">
-                Manage your suppliers and integrate with fulfillment platforms.
-              </p>
-              <div className="flex items-center gap-2 text-accent text-sm font-semibold">
-                Manage <ArrowRight size={16} />
-              </div>
-            </Link>
-
-            <Link href="/settings" className="card bg-gradient-to-br from-orange-500/10 to-red-500/10 border border-orange-500/30 group hover:border-accent transition">
-              <Settings size={32} className="text-orange-400 mb-3 group-hover:scale-110 transition" />
-              <h4 className="text-lg font-bold text-white mb-2">Settings</h4>
-              <p className="text-sm text-gray-400 mb-4">
-                Configure automations, notifications, and API integrations.
-              </p>
-              <div className="flex items-center gap-2 text-accent text-sm font-semibold">
-                Configure <ArrowRight size={16} />
-              </div>
-            </Link>
-          </div>
-        </div>
-
         {/* Empty State */}
         {orders.length === 0 && products.length === 0 && (
           <div className="card text-center py-12">
             <Package size={48} className="mx-auto text-gray-600 mb-4" />
             <h3 className="text-xl font-bold text-white mb-2">Ready to get started?</h3>
-            <p className="text-gray-400 mb-6">Add your first product and order to see your dashboard come alive</p>
+            <p className="text-gray-400 mb-6">Connect APIs, discover trending products, and start your dropshipping business</p>
             <div className="flex gap-4 justify-center flex-wrap">
               <Link href="/integrations" className="btn btn-primary flex items-center gap-2">
                 <Zap size={16} />
                 Connect Integrations
               </Link>
-              <Link href="/products" className="btn btn-secondary flex items-center gap-2">
-                <Plus size={16} />
-                Add Product
+              <Link href="/trending" className="btn btn-secondary flex items-center gap-2">
+                <Flame size={16} />
+                View Trending
               </Link>
               <Link href="/help" className="btn btn-secondary flex items-center gap-2">
                 <BookOpen size={16} />
