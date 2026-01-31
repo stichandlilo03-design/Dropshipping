@@ -116,7 +116,11 @@ export default function Dashboard() {
       // Load trending products from real API
       try {
         console.log('[Dashboard] 📥 Fetching trending products...');
-        const response = await fetch('/api/trending');
+        const response = await fetch('/api/trending', {
+          headers: {
+            'x-user-id': userId,
+          },
+        });
         
         if (response.ok) {
           const data = await response.json();
