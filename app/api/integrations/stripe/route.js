@@ -2,12 +2,12 @@ import { NextResponse } from 'next/server';
 
 export async function POST(request) {
   try {
-    const { publishableKey, secretKey } = await request.json();
+    const body = await request.json();
+    const { publishableKey, secretKey } = body;
 
-    console.log('[Stripe Validator] Testing Publishable and Secret Keys...');
+    console.log('[Stripe Validator] Testing Keys...');
 
     if (!publishableKey || !secretKey) {
-      console.error('[Stripe Validator] ❌ Missing required fields');
       return NextResponse.json(
         { 
           success: false, 
@@ -17,84 +17,50 @@ export async function POST(request) {
       );
     }
 
-    // Validate key formats
     if (!publishableKey.startsWith('pk_') || !secretKey.startsWith('sk_')) {
-      console.error('[Stripe Validator] ❌ Invalid key format');
       return NextResponse.json(
         { 
           success: false, 
-          error: 'Invalid key format. Publishable Key should start with "pk_" and Secret Key should start with "sk_"' 
+          error: 'Invalid key format (pk_ and sk_)' 
         },
         { status: 400 }
       );
     }
 
-    console.log('[Stripe Validator] Testing with Stripe API...');
-
-    // Test Stripe API with secret key
-    const response = await fetch('https://api.stripe.com/v1/customers', {
+    const response = await fetch('https://api.stripe.com/v1/customers?limit=1', {
       method: 'GET',
       headers: {
         'Authorization': `Bearer ${secretKey}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
       },
     });
 
-    const responseData = await response.text();
-    console.log('[Stripe Validator] Response status:', response.status);
+    console.log('[Stripe Validator] Response:', response.status);
 
     if (!response.ok) {
-      console.error('[Stripe Validator] ❌ API validation failed:', responseData.substring(0, 200));
-      
-      if (response.status === 401 || response.status === 403) {
-        return NextResponse.json(
-          { 
-            success: false, 
-            error: 'Invalid Secret Key. Please check your Stripe Secret Key.' 
-          },
-          { status: 401 }
-        );
-      }
-
       return NextResponse.json(
         { 
           success: false, 
-          error: `Stripe API error: ${response.status}` 
+          error: 'Invalid Secret Key' 
         },
-        { status: response.status }
+        { status: 401 }
       );
     }
 
-    let stripeData;
-    try {
-      stripeData = JSON.parse(responseData);
-    } catch (e) {
-      console.error('[Stripe Validator] ❌ Failed to parse response');
-      return NextResponse.json(
-        { 
-          success: false, 
-          error: 'Invalid response from Stripe' 
-        },
-        { status: 500 }
-      );
-    }
+    const keyType = secretKey.includes('_live_') ? 'Live' : 'Test';
 
-    console.log('[Stripe Validator] ✅ Keys are valid!');
+    console.log('[Stripe Validator] ✅ Valid! Key type:', keyType);
 
-    // Return success with account info
     return NextResponse.json({
       success: true,
       credentials: {
         provider: 'Stripe',
-        keyType: secretKey.includes('_live_') ? 'Live' : 'Test',
+        keyType: keyType,
         status: 'active',
-        apiVersion: '2023-10-16',
-        testedAt: new Date().toISOString(),
       },
     });
 
   } catch (error) {
-    console.error('[Stripe Validator] ❌ Error:', error.message);
+    console.error('[Stripe Validator] Error:', error.message);
     return NextResponse.json(
       { 
         success: false, 
