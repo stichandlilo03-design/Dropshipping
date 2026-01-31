@@ -26,31 +26,6 @@ const INTEGRATIONS = [
     status: 'disconnected',
   },
   {
-    id: 'tiktok',
-    name: 'TikTok Shop',
-    icon: '🎵',
-    category: 'Social Commerce',
-    description: 'Auto-publish videos to TikTok and sell directly',
-    fields: [
-      { 
-        name: 'Client Key', 
-        key: 'clientKey', 
-        type: 'text', 
-        placeholder: 'awlp8674jr02y4b4',
-        help: 'Get from: TikTok Developers → Your App → App details → Credentials'
-      },
-      { 
-        name: 'Client Secret', 
-        key: 'clientSecret', 
-        type: 'password', 
-        placeholder: 'Q4a7y962CyIAmbcNNZi43GlKOckTTj1L',
-        help: 'Get from: TikTok Developers → Your App → App details → Credentials'
-      },
-    ],
-    docs: 'https://developers.tiktok.com/doc/content-posting-api-reference-direct-post',
-    status: 'disconnected',
-  },
-  {
     id: 'shopify',
     name: 'Shopify',
     icon: '🛍️',
@@ -69,7 +44,7 @@ const INTEGRATIONS = [
         key: 'accessToken', 
         type: 'password', 
         placeholder: 'shpat_xxxxxxxxxxxxxxxxxxxxxxxx',
-        help: 'Get from: Shopify Admin → Settings → Apps and integrations → Develop apps → API credentials'
+        help: 'Get from: Shopify Admin → Apps and integrations → Develop apps → API credentials'
       },
     ],
     docs: 'https://shopify.dev/docs/admin-api/rest/reference',
@@ -98,6 +73,56 @@ const INTEGRATIONS = [
       },
     ],
     docs: 'https://stripe.com/docs/keys',
+    status: 'disconnected',
+  },
+  {
+    id: 'tiktok',
+    name: 'TikTok Shop',
+    icon: '🎵',
+    category: 'Social Commerce',
+    description: 'Auto-publish videos to TikTok and sell directly',
+    fields: [
+      { 
+        name: 'Client Key', 
+        key: 'clientKey', 
+        type: 'text', 
+        placeholder: 'awlp8674jr02y4b4',
+        help: 'Get from: TikTok Developers → Your App → Development → Client ID'
+      },
+      { 
+        name: 'Client Secret', 
+        key: 'clientSecret', 
+        type: 'password', 
+        placeholder: 'Q4a7y962CyIAmbcNNZi43GlKOckTTj1L',
+        help: 'Get from: TikTok Developers → Your App → Development → Client Secret'
+      },
+    ],
+    docs: 'https://developers.tiktok.com/doc/content-posting-api-reference-direct-post',
+    status: 'disconnected',
+  },
+  {
+    id: 'gmail-smtp',
+    name: 'Gmail SMTP',
+    icon: '📧',
+    category: 'Email & Notifications',
+    description: 'Send transactional emails and notifications',
+    fields: [
+      { 
+        name: 'Email Address', 
+        key: 'email', 
+        type: 'text', 
+        placeholder: 'your-email@gmail.com',
+        help: 'Your Gmail email address'
+      },
+      { 
+        name: 'App Password', 
+        key: 'appPassword', 
+        type: 'password', 
+        placeholder: 'xxxx xxxx xxxx xxxx',
+        help: 'Get from: myaccount.google.com/security → App passwords (requires 2-Step Verification)'
+      },
+    ],
+    docs: 'https://support.google.com/accounts/answer/185833',
     status: 'disconnected',
   },
 ];
@@ -327,7 +352,7 @@ export default function Integrations() {
         )}
 
         {/* Categories */}
-        {['Print-on-Demand', 'Payment Processing', 'Social Commerce', 'Store Integration'].map(category => {
+        {['Print-on-Demand', 'Store Integration', 'Payment Processing', 'Social Commerce', 'Email & Notifications'].map(category => {
           const categoryIntegrations = integrations.filter(i => i.category === category);
           if (categoryIntegrations.length === 0) return null;
 
@@ -335,9 +360,10 @@ export default function Integrations() {
             <div key={category} className="space-y-4">
               <h2 className="text-xl font-bold text-white flex items-center gap-2">
                 {category === 'Print-on-Demand' && '📦'}
-                {category === 'Payment Processing' && '💳'}
-                {category === 'Social Commerce' && '📱'}
                 {category === 'Store Integration' && '🛍️'}
+                {category === 'Payment Processing' && '💳'}
+                {category === 'Social Commerce' && '🎵'}
+                {category === 'Email & Notifications' && '📧'}
                 {category}
               </h2>
 
@@ -467,9 +493,32 @@ export default function Integrations() {
           </h3>
           <div className="space-y-2 text-sm text-gray-300">
             <p>• Make sure your credentials are correct (no extra spaces)</p>
-            <p>• Check browser DevTools Console (F12) for error details</p>
-            <p>• If connection fails, reload the page and try again</p>
+            <p>• Check browser DevTools Console (F12) for detailed error messages</p>
+            <p>• Each integration connects independently - you can test them one by one</p>
             <p>• Your credentials are saved securely in localStorage</p>
+            <p>• For help getting credentials, click the "📖 Docs" button on each integration</p>
+          </div>
+        </div>
+
+        {/* Integration Status Summary */}
+        <div className="card bg-gradient-to-br from-blue-500/10 to-purple-500/10 border border-blue-500/30">
+          <h3 className="text-lg font-bold text-white mb-4">📊 Integration Status</h3>
+          <div className="space-y-2">
+            {integrations.map(integration => (
+              <div key={integration.id} className="flex items-center justify-between text-sm">
+                <span className="flex items-center gap-2">
+                  <span>{integration.icon}</span>
+                  <span className="text-gray-300">{integration.name}</span>
+                </span>
+                <span className={`px-2 py-1 rounded text-xs font-semibold ${
+                  integration.status === 'connected'
+                    ? 'bg-green-500/20 text-green-400'
+                    : 'bg-gray-700 text-gray-400'
+                }`}>
+                  {integration.status === 'connected' ? '✅ Connected' : '⭕ Disconnected'}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
