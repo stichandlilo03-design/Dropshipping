@@ -13,68 +13,93 @@ export async function POST(request) {
       );
     }
 
-    console.log('Printful validation: attempting connection...');
+    console.log('Printful validation: attempting OAuth connection...');
 
-    // Test direct API connection with basic auth
+    // Use Printful OAuth endpoint to get access token
     try {
-      const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
-      
-      // First, try to get stores info
-      const response = await fetch('https://api.printful.com/v2/stores', {
-        method: 'GET',
+      const params = new URLSearchParams();
+      params.append('client_id', clientId);
+      params.append('client_secret', clientSecret);
+      params.append('grant_type', 'client_credentials');
+
+      const tokenResponse = await fetch('https://www.printful.com/oauth/token', {
+        method: 'POST',
         headers: {
-          'Authorization': `Basic ${auth}`,
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded',
         },
+        body: params.toString(),
       });
 
-      console.log('Printful response status:', response.status);
+      console.log('Printful OAuth response status:', tokenResponse.status);
 
-      if (!response.ok) {
-        const errorData = await response.text();
-        console.error('Printful error:', errorData);
-
-        if (response.status === 401) {
-          return NextResponse.json(
-            { error: 'Invalid Printful credentials. Check your Client ID and Client Secret in Printful Dashboard → Apps → Your App → Credentials' },
-            { status: 401 }
-          );
-        }
-
-        if (response.status === 403) {
-          return NextResponse.json(
-            { error: 'Access denied. Make sure your app has the correct permissions in Printful' },
-            { status: 403 }
-          );
-        }
+      if (!tokenResponse.ok) {
+        const errorText = await tokenResponse.text();
+        console.error('Printful OAuth error:', errorText);
 
         return NextResponse.json(
-          { error: `Printful API error: ${response.statusText}` },
-          { status: response.status }
+          { 
+            error: 'Invalid Printful credentials. Check your Client ID and Client Secret in Printful Dashboard → Apps → Your App → Credentials' 
+          },
+          { status: 401 }
         );
       }
 
-      const data = await response.json();
-      
-      if (!data.data || data.data.length === 0) {
+      const tokenData = await tokenResponse.json();
+
+      if (!tokenData.access_token) {
         return NextResponse.json(
-          { error: 'No stores found in Printful account. Create a store first in Printful Dashboard' },
+          { error: 'No access token received from Printful. Check your credentials and app settings' },
           { status: 400 }
         );
       }
 
-      const store = data.data[0];
+      // Now verify the token by getting store information
+      const storeResponse = await fetch('https://api.printful.com/stores', {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${tokenData.access_token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      console.log('Printful stores response status:', storeResponse.status);
+
+      if (!storeResponse.ok) {
+        const errorText = await storeResponse.text();
+        console.error('Printful stores error:', errorText);
+
+        return NextResponse.json(
+          { error: 'Failed to verify Printful token. Token may be invalid or expired.' },
+          { status: 401 }
+        );
+      }
+
+      const storesData = await storeResponse.json();
+
+      // Check if we have any stores
+      if (!storesData.result || storesData.result.length === 0) {
+        return NextResponse.json(
+          { 
+            error: 'No stores found in your Printful account. Create a store first in Printful Dashboard → Stores' 
+          },
+          { status: 400 }
+        );
+      }
+
+      const store = storesData.result[0];
 
       const credentials = {
         clientId,
         clientSecret: clientSecret.substring(0, 5) + '...' + clientSecret.substring(-5), // Hide secret
+        accessToken: tokenData.access_token.substring(0, 10) + '...', // Hide token
+        tokenType: tokenData.token_type || 'Bearer',
+        expiresIn: tokenData.expires_in,
         storeId: store.id,
         storeName: store.name,
-        storeEmail: store.created,
         connectedAt: new Date().toISOString(),
       };
 
-      console.log('Printful connection successful:', { storeName: store.name });
+      console.log('Printful connection successful:', { storeName: store.name, storeId: store.id });
 
       return NextResponse.json({
         success: true,
@@ -87,7 +112,7 @@ export async function POST(request) {
       
       return NextResponse.json(
         { 
-          error: `Failed to connect to Printful: ${apiError.message}. Check your credentials and try again.` 
+          error: `Failed to connect to Printful: ${apiError.message}. Make sure your credentials are correct and try again.` 
         },
         { status: 500 }
       );
