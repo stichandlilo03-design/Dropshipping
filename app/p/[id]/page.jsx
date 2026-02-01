@@ -67,6 +67,21 @@ export default function ProductPage() {
           };
           setProduct(productData);
           await loadRelatedProducts(productData);
+
+          // Increment view count
+          try {
+            const currentViews = productData.views || 0;
+            await fetch('/api/product/view', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                productId: params.id,
+                newViews: currentViews + 1,
+              }),
+            }).catch(err => console.log('[Views] Error:', err));
+          } catch (err) {
+            console.log('[Views] Failed to increment:', err);
+          }
         } else {
           setError('Product not found');
         }
