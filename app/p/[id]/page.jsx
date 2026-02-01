@@ -128,7 +128,7 @@ export default function ProductPage() {
       const orderRef = await addDoc(collection(db, 'orders'), orderData);
       console.log('[Checkout] Order created:', orderRef.id);
 
-      // Create Stripe checkout session
+      // Create Stripe checkout session with PRODUCT ID
       const response = await fetch('/api/stripe/checkout', {
         method: 'POST',
         headers: {
@@ -136,6 +136,7 @@ export default function ProductPage() {
         },
         body: JSON.stringify({
           orderId: orderRef.id,
+          productId: product.id,  // ✅ IMPORTANT: Added productId
           productName: product.name,
           productPrice: product.price,
           quantity: quantity,
@@ -150,6 +151,7 @@ export default function ProductPage() {
 
       if (data.success && data.checkoutUrl) {
         console.log('[Checkout] Redirecting to Stripe...');
+        console.log('[Checkout] Admin ID:', data.adminId);
         // Redirect to Stripe checkout
         window.location.href = data.checkoutUrl;
       } else {
