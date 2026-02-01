@@ -134,7 +134,7 @@ export async function GET(request) {
     }
 
     // ============================================================================
-    // PRINTFUL - ADD BESTSELLERS
+    // PRINTFUL - FETCH YOUR PRODUCTS + BESTSELLERS
     // ============================================================================
     console.log('[API] ========== PRINTFUL ==========');
     
@@ -146,11 +146,87 @@ export async function GET(request) {
       console.log('[API] Token length:', token?.length);
 
       if (token) {
-        // Just add 3 bestsellers to always have products
+        // STEP 1: Try to fetch YOUR custom products from Printful
+        console.log('[API] 📋 Fetching YOUR custom Printful products...');
+        
+        try {
+          const customResponse = await fetch(
+            'https://api.v2.printful.com/store/products?limit=50',
+            {
+              method: 'GET',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+            }
+          );
+
+          console.log('[API] Custom products response status:', customResponse.status);
+
+          if (customResponse.ok) {
+            const customData = await customResponse.json();
+            const customProducts = customData.result || [];
+            
+            console.log('[API] Custom products found:', customProducts.length);
+
+            // Process your custom products
+            for (const customProduct of customProducts.slice(0, 20)) {
+              try {
+                // Get detailed info for each product
+                const detailResponse = await fetch(
+                  `https://api.v2.printful.com/store/products/${customProduct.id}`,
+                  {
+                    method: 'GET',
+                    headers: {
+                      'Authorization': `Bearer ${token}`,
+                      'Content-Type': 'application/json',
+                    },
+                  }
+                );
+
+                if (detailResponse.ok) {
+                  const detailData = await detailResponse.json();
+                  const syncProduct = detailData.result?.sync_product;
+                  const syncVariants = detailData.result?.sync_variants || [];
+                  const firstVariant = syncVariants[0];
+
+                  if (syncProduct && firstVariant) {
+                    allProducts.push({
+                      id: `printful_custom_${syncProduct.id}`,
+                      title: syncProduct.name,
+                      supplier: 'Printful (Your Product)',
+                      image: syncProduct.thumbnail_url,
+                      price: firstVariant.retail_price,
+                      currency: 'USD',
+                      description: syncProduct.description?.substring(0, 150),
+                      availability_status: 'in_stock',
+                      variant_count: syncVariants.length,
+                      source: 'printful_custom'
+                    });
+
+                    console.log('[API] ✅ Added Printful product:', syncProduct.name);
+                  }
+                }
+              } catch (err) {
+                console.warn('[API] ⚠️ Error fetching custom product details:', err.message);
+              }
+            }
+          } else {
+            console.warn('[API] ⚠️ Could not fetch custom products:', customResponse.status);
+          }
+        } catch (err) {
+          console.warn('[API] ⚠️ Error fetching custom products:', err.message);
+        }
+
+        // STEP 2: Add Printful bestsellers (if you have few custom products)
+        console.log('[API] 🏆 Adding Printful bestsellers...');
+        
         const bestsellers = [
           { id: 71, name: 'Bella + Canvas T-Shirt', type: 'T-Shirt' },
           { id: 172, name: 'Framed Poster', type: 'Poster' },
           { id: 23, name: 'Hoodie', type: 'Hoodie' },
+          { id: 49, name: 'Dad Hat', type: 'Hat' },
+          { id: 85, name: 'Mug', type: 'Mug' },
         ];
 
         for (const item of bestsellers) {
@@ -174,23 +250,23 @@ export async function GET(request) {
 
               if (productInfo && firstVariant) {
                 allProducts.push({
-                  id: `printful_${productInfo.id}`,
+                  id: `printful_bestseller_${productInfo.id}`,
                   title: productInfo.title,
-                  supplier: 'Printful',
+                  supplier: 'Printful Bestseller',
                   image: productInfo.image,
                   price: parseFloat(firstVariant.price).toFixed(2),
                   currency: productInfo.currency,
                   description: productInfo.description?.substring(0, 150),
                   availability_status: 'in_stock',
                   badge: '🏆 Bestseller',
-                  source: 'printful'
+                  source: 'printful_bestseller'
                 });
 
-                console.log('[API] ✅ Added Printful:', productInfo.title);
+                console.log('[API] ✅ Added bestseller:', productInfo.title);
               }
             }
           } catch (err) {
-            console.warn('[API] ⚠️ Printful error for', item.id, ':', err.message);
+            console.warn('[API] ⚠️ Bestseller error for', item.id, ':', err.message);
           }
         }
       }
@@ -202,7 +278,8 @@ export async function GET(request) {
     console.log('[API] Total products:', allProducts.length);
     console.log('[API] Breakdown:', {
       shopify: allProducts.filter(p => p.source === 'shopify').length,
-      printful: allProducts.filter(p => p.source === 'printful').length
+      printful_custom: allProducts.filter(p => p.source === 'printful_custom').length,
+      printful_bestseller: allProducts.filter(p => p.source === 'printful_bestseller').length
     });
 
     return NextResponse.json({
