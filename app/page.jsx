@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -62,19 +61,20 @@ export default function Dashboard() {
 
       console.log('[Dashboard] Loading data for userId:', userId);
 
-      // Load orders
+      // Load orders (ALL orders from Firestore, not filtered by userId)
       try {
-        const ordersQuery = query(
-          collection(firebaseDb, 'orders'),
-          where('userId', '==', userId)
-        );
-        const ordersSnap = await getDocs(ordersQuery);
+        console.log('[Dashboard] Fetching all orders from /orders collection');
+        const ordersRef = collection(firebaseDb, 'orders');
+        const ordersSnap = await getDocs(ordersRef);
         const ordersData = ordersSnap.docs.map(doc => ({
           id: doc.id,
           ...doc.data(),
         }));
         console.log('[Dashboard] Orders loaded:', ordersData.length);
         setOrders(ordersData);
+        
+        // Calculate stats with orders
+        calculateStats(ordersData, products, stats.trendingAdded);
       } catch (ordersError) {
         console.error('[Dashboard] Error loading orders:', ordersError);
         setOrders([]);
@@ -98,6 +98,7 @@ export default function Dashboard() {
         const trendingCount = productsData.filter(p => p.trendingSource).length;
         console.log('[Dashboard] Products from trending:', trendingCount);
 
+        // Calculate stats with new products data
         calculateStats(orders, productsData, trendingCount);
       } catch (productsError) {
         console.error('[Dashboard] Error loading products:', productsError);
@@ -108,7 +109,7 @@ export default function Dashboard() {
       try {
         const integrationsData = {};
         const integrationsQuery = query(
-          collection(firebaseDb, 'users', userId, 'integrations')
+          collection(firebaseDb, `users/${userId}/integrations`)
         );
         const integrationsSnap = await getDocs(integrationsQuery);
         integrationsSnap.forEach(doc => {
@@ -218,13 +219,17 @@ export default function Dashboard() {
     setFeatureStatus(features);
   };
 
-  const calculateStats = (ordersData, productsData, trendingAdded = 0) => {
+  const calculateStats = (ordersData = [], productsData = [], trendingAdded = 0) => {
     try {
+      console.log('[Dashboard] Calculating stats with orders:', ordersData.length, 'products:', productsData.length);
+      
       const totalRevenue = ordersData.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0);
-      const totalCost = ordersData.reduce((sum, order) => sum + (parseFloat(order.cost) || 0), 0);
+      const totalCost = ordersData.reduce((sum, order) => sum + (parseFloat(order.shipping) || 0), 0);
       const totalProfit = totalRevenue - totalCost;
       const profitMargin = totalRevenue > 0 ? Math.round((totalProfit / totalRevenue) * 100) : 0;
       const avgOrderValue = ordersData.length > 0 ? (totalRevenue / ordersData.length).toFixed(2) : 0;
+
+      console.log('[Dashboard] Stats calculated - Revenue:', totalRevenue, 'Orders:', ordersData.length);
 
       setStats({
         totalRevenue: totalRevenue.toFixed(2),
