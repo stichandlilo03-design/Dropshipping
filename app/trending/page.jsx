@@ -2,11 +2,12 @@
 
 import { useState, useEffect } from 'react';
 import { getTrendingProductsPage, searchTrendingProducts, filterBySupplier } from '@/lib/trending';
-import { useAuth } from '@/lib/auth';
+import { auth } from '@/lib/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 import Link from 'next/link';
 
 export default function TrendingPage() {
-  const { user } = useAuth();
+  const [user, setUser] = useState(null);
   const [products, setProducts] = useState([]);
   const [filteredProducts, setFilteredProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -15,9 +16,24 @@ export default function TrendingPage() {
   const [filterSupplier, setFilterSupplier] = useState('all');
   const [sortBy, setSortBy] = useState('trending');
 
-  // Load products on mount
+  // Check auth state
   useEffect(() => {
-    if (!user?.uid) return;
+    try {
+      const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+        setUser(currentUser);
+      });
+      return unsubscribe;
+    } catch (err) {
+      console.error('[Trending] Auth error:', err);
+    }
+  }, []);
+
+  // Load products when user is available
+  useEffect(() => {
+    if (!user?.uid) {
+      setLoading(false);
+      return;
+    }
 
     const loadProducts = async () => {
       try {
@@ -49,11 +65,11 @@ export default function TrendingPage() {
     };
 
     loadProducts();
-  }, [user]);
+  }, [user?.uid]);
 
   // Apply filters and search
   useEffect(() => {
-    if (!products) {
+    if (!products || products.length === 0) {
       setFilteredProducts([]);
       return;
     }
