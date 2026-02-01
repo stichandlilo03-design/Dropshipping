@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { doc, getDoc, addDoc, collection } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { ArrowLeft, Star, ShoppingCart, Share2, Heart, Copy, Check, Truck, Shield, RefreshCw, Mail, Phone, MapPin, AlertCircle, Loader } from 'lucide-react';
+import { ArrowLeft, Star, ShoppingCart, Share2, Heart, Copy, Check, Truck, Shield, RefreshCw, Mail, Phone, AlertCircle, Loader } from 'lucide-react';
 
 export default function ProductPage() {
   const params = useParams();
@@ -20,7 +20,6 @@ export default function ProductPage() {
   const [checkoutError, setCheckoutError] = useState(null);
   const [activeTab, setActiveTab] = useState('details');
   
-  // Form state
   const [formData, setFormData] = useState({
     email: '',
     fullName: '',
@@ -77,7 +76,6 @@ export default function ProductPage() {
   const handleCheckout = async (e) => {
     e.preventDefault();
     
-    // Validation
     if (!formData.email || !formData.fullName || !formData.phone || !formData.address) {
       setCheckoutError('Please fill in all required fields');
       return;
@@ -92,12 +90,14 @@ export default function ProductPage() {
       setCheckoutLoading(true);
       setCheckoutError(null);
 
+      console.log('[Checkout] Starting checkout process...');
+      console.log('[Checkout] Product:', product.id);
+
       const orderTotal = parseFloat(product.price) * quantity;
       const shippingCost = 10.00;
-      const tax = parseFloat((orderTotal * 0.08).toFixed(2)); // 8% tax
+      const tax = parseFloat((orderTotal * 0.08).toFixed(2));
       const finalTotal = parseFloat((orderTotal + shippingCost + tax).toFixed(2));
 
-      // Create order in Firestore
       const orderData = {
         productId: product.id,
         productName: product.name,
@@ -108,7 +108,6 @@ export default function ProductPage() {
         tax: tax,
         total: finalTotal,
         
-        // Customer info
         customerEmail: formData.email,
         customerName: formData.fullName,
         customerPhone: formData.phone,
@@ -118,17 +117,18 @@ export default function ProductPage() {
         customerZipCode: formData.zipCode,
         customerCountry: formData.country,
         
-        // Status
         status: 'pending_payment',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
 
-      // Add to orders collection
-      const orderRef = await addDoc(collection(db, 'orders'), orderData);
-      console.log('[Checkout] Order created:', orderRef.id);
+      console.log('[Checkout] Order data:', orderData);
+      console.log('[Checkout] Attempting to create order in /orders collection...');
 
-      // Create Stripe checkout session with PRODUCT ID
+      // ✅ FIX: Create in root /orders collection (not nested)
+      const orderRef = await addDoc(collection(db, 'orders'), orderData);
+      console.log('[Checkout] ✅ Order created successfully:', orderRef.id);
+
       const response = await fetch('/api/stripe/checkout', {
         method: 'POST',
         headers: {
@@ -136,7 +136,7 @@ export default function ProductPage() {
         },
         body: JSON.stringify({
           orderId: orderRef.id,
-          productId: product.id,  // ✅ IMPORTANT: Added productId
+          productId: product.id,
           productName: product.name,
           productPrice: product.price,
           quantity: quantity,
@@ -148,11 +148,10 @@ export default function ProductPage() {
       });
 
       const data = await response.json();
+      console.log('[Checkout] Stripe response:', data);
 
       if (data.success && data.checkoutUrl) {
         console.log('[Checkout] Redirecting to Stripe...');
-        console.log('[Checkout] Admin ID:', data.adminId);
-        // Redirect to Stripe checkout
         window.location.href = data.checkoutUrl;
       } else {
         setCheckoutError(data.error || 'Failed to create checkout session');
@@ -302,59 +301,30 @@ export default function ProductPage() {
                       <p className="text-white font-semibold">{product.category}</p>
                     </div>
                   )}
-                  {product.variants && (
-                    <div className="pt-4">
-                      <p className="text-sm text-gray-400">Available Variants</p>
-                      <p className="text-white font-semibold">{product.variants}</p>
-                    </div>
-                  )}
                 </div>
               )}
 
               {activeTab === 'reviews' && (
                 <div className="space-y-6">
                   {product.reviews ? (
-                    <>
-                      <div className="space-y-2">
-                        <h3 className="text-xl font-bold text-white">Customer Reviews</h3>
-                        <div className="flex items-center gap-4">
-                          <div className="flex gap-1">
-                            {[...Array(5)].map((_, i) => (
-                              <Star
-                                key={i}
-                                size={24}
-                                className={i < Math.round(product.rating || 4) ? 'fill-yellow-400 text-yellow-400' : 'text-gray-600'}
-                              />
-                            ))}
-                          </div>
-                          <span className="text-white">
-                            <span className="font-bold text-lg">{product.rating || 4.5}</span> out of 5
-                          </span>
+                    <div className="space-y-2">
+                      <h3 className="text-xl font-bold text-white">Customer Reviews</h3>
+                      <div className="flex items-center gap-4">
+                        <div className="flex gap-1">
+                          {[...Array(5)].map((_, i) => (
+                            <Star
+                              key={i}
+                              size={24}
+                              className={i < Math.round(product.rating || 4) ? 'fill-yellow-400 text-yellow-400' : 'text-gray-600'}
+                            />
+                          ))}
                         </div>
-                        <p className="text-gray-400">{product.reviews} verified customer reviews</p>
+                        <span className="text-white">
+                          <span className="font-bold text-lg">{product.rating || 4.5}</span> out of 5
+                        </span>
                       </div>
-
-                      <div className="space-y-4">
-                        {[1, 2, 3].map(i => (
-                          <div key={i} className="bg-slate-800 rounded-lg p-4 border border-slate-700">
-                            <div className="flex items-center justify-between mb-2">
-                              <p className="text-white font-semibold">Great product!</p>
-                              <div className="flex gap-1">
-                                {[...Array(5)].map((_, j) => (
-                                  <Star
-                                    key={j}
-                                    size={16}
-                                    className="fill-yellow-400 text-yellow-400"
-                                  />
-                                ))}
-                              </div>
-                            </div>
-                            <p className="text-gray-400 text-sm">Verified Purchase • Customer {i}</p>
-                            <p className="text-gray-300 text-sm mt-2">Excellent quality and fast shipping. Highly recommend!</p>
-                          </div>
-                        ))}
-                      </div>
-                    </>
+                      <p className="text-gray-400">{product.reviews} verified customer reviews</p>
+                    </div>
                   ) : (
                     <p className="text-gray-400">No reviews yet. Be the first to review!</p>
                   )}
@@ -388,26 +358,10 @@ export default function ProductPage() {
 
           {/* Right: Price & Checkout */}
           <div className="space-y-6">
-            {/* Product Title & Rating */}
             <div>
               <h1 className="text-3xl font-bold text-white mb-3">{product.name}</h1>
-              {product.reviews && (
-                <div className="flex items-center gap-2">
-                  <div className="flex gap-1">
-                    {[...Array(5)].map((_, i) => (
-                      <Star
-                        key={i}
-                        size={16}
-                        className={i < Math.round(product.rating || 4) ? 'fill-yellow-400 text-yellow-400' : 'text-gray-600'}
-                      />
-                    ))}
-                  </div>
-                  <span className="text-gray-400 text-sm">({product.reviews} reviews)</span>
-                </div>
-              )}
             </div>
 
-            {/* Price Box */}
             <div className="bg-gradient-to-r from-green-900/50 to-emerald-900/50 border border-green-500/30 rounded-lg p-6 space-y-3">
               <p className="text-5xl font-bold text-green-400">${productPrice.toFixed(2)}</p>
               
@@ -430,7 +384,6 @@ export default function ProductPage() {
               )}
             </div>
 
-            {/* Quantity Selector */}
             <div className="space-y-3">
               <p className="text-gray-400 font-semibold">Quantity</p>
               <div className="flex items-center gap-6 bg-slate-800 rounded-lg p-4 border border-slate-700 w-fit">
@@ -450,7 +403,6 @@ export default function ProductPage() {
               </div>
             </div>
 
-            {/* Share Button */}
             <button
               onClick={handleShare}
               className="w-full bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-semibold flex items-center justify-center gap-2"
@@ -468,7 +420,6 @@ export default function ProductPage() {
               )}
             </button>
 
-            {/* Buy Button */}
             <button
               onClick={() => {
                 if (product.inventory === 0) {
@@ -484,7 +435,6 @@ export default function ProductPage() {
               Buy Now - ${total.toFixed(2)}
             </button>
 
-            {/* Trust Badges */}
             <div className="space-y-3 bg-slate-800 rounded-lg p-4 border border-slate-700">
               <div className="flex items-start gap-3">
                 <Shield size={20} className="text-green-400 flex-shrink-0 mt-1" />
@@ -509,15 +459,10 @@ export default function ProductPage() {
               </div>
             </div>
 
-            {/* Contact */}
             <div className="space-y-3 text-sm text-gray-400">
               <div className="flex items-center gap-2">
                 <Mail size={16} />
                 <a href="mailto:support@dropshipwithmonk.sbs" className="hover:text-white">support@dropshipwithmonk.sbs</a>
-              </div>
-              <div className="flex items-center gap-2">
-                <Phone size={16} />
-                <span>+1 (555) 000-0000</span>
               </div>
             </div>
           </div>
@@ -546,7 +491,6 @@ export default function ProductPage() {
             )}
 
             <form onSubmit={handleCheckout} className="space-y-6">
-              {/* Order Summary */}
               <div className="bg-slate-900 rounded-lg p-4 border border-slate-700">
                 <h3 className="text-white font-bold mb-4">Order Summary</h3>
                 <div className="space-y-2 text-sm">
@@ -569,7 +513,6 @@ export default function ProductPage() {
                 </div>
               </div>
 
-              {/* Customer Info */}
               <div className="space-y-4">
                 <h3 className="text-white font-bold">Contact Information</h3>
                 
@@ -604,7 +547,6 @@ export default function ProductPage() {
                 />
               </div>
 
-              {/* Shipping Address */}
               <div className="space-y-4">
                 <h3 className="text-white font-bold">Shipping Address</h3>
                 
@@ -661,7 +603,6 @@ export default function ProductPage() {
                 </div>
               </div>
 
-              {/* Action Buttons */}
               <div className="flex gap-3 pt-6 border-t border-slate-700">
                 <button
                   type="button"
