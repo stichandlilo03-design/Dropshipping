@@ -1,31 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Check, Package, Truck, Mail } from 'lucide-react';
 
-export default function SuccessPage() {
+function SuccessContent() {
   const searchParams = useSearchParams();
-  const orderId = searchParams.get('order');
-  const [loading, setLoading] = useState(true);
-  const [orderData, setOrderData] = useState(null);
-
-  useEffect(() => {
-    // In a real app, you'd fetch the order from your database
-    setLoading(false);
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-400">Processing your order...</p>
-        </div>
-      </div>
-    );
-  }
+  const orderId = searchParams.get('order') || 'Order-' + Math.random().toString(36).substr(2, 9);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-6">
@@ -47,7 +29,7 @@ export default function SuccessPage() {
           <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 mt-6">
             <p className="text-green-400 font-semibold">✅ Order Confirmed</p>
             <p className="text-gray-400 text-sm mt-1">
-              Order ID: <span className="font-mono">{orderId}</span>
+              Order ID: <span className="font-mono text-white">{orderId}</span>
             </p>
           </div>
         </div>
@@ -169,5 +151,29 @@ export default function SuccessPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function SuccessSkeleton() {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-6">
+      <div className="max-w-2xl w-full space-y-8">
+        <div className="text-center space-y-4">
+          <div className="flex justify-center mb-6">
+            <div className="w-20 h-20 bg-slate-700 rounded-full animate-pulse"></div>
+          </div>
+          <div className="h-10 bg-slate-700 rounded w-3/4 mx-auto animate-pulse"></div>
+          <div className="h-6 bg-slate-700 rounded w-1/2 mx-auto animate-pulse"></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function SuccessPage() {
+  return (
+    <Suspense fallback={<SuccessSkeleton />}>
+      <SuccessContent />
+    </Suspense>
   );
 }
