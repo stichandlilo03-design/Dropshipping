@@ -7,7 +7,7 @@ import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc, query, where, w
 import { db } from '@/lib/firebase';
 import { auth } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { Search, Plus, Trash2, Eye, ArrowLeft, Package, Copy, Edit, Check, AlertCircle, QrCode, Save, X, Upload, BarChart3 } from 'lucide-react';
+import { Search, Plus, Trash2, Eye, ArrowLeft, Package, Copy, Edit, Check, AlertCircle, QrCode, Save, X, Share2, Download, Upload, BarChart3, Star, TrendingUp, Heart, ShoppingCart, DollarSign, Zap } from 'lucide-react';
 
 export default function ProductsPage() {
   const router = useRouter();
@@ -24,9 +24,11 @@ export default function ProductsPage() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [formData, setFormData] = useState({});
   const [loading, setLoading] = useState(true);
+  const [copiedUrl, setCopiedUrl] = useState(null);
   const [notification, setNotification] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [selectedProducts, setSelectedProducts] = useState(new Set());
+  const [showBulkActions, setShowBulkActions] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -44,6 +46,7 @@ export default function ProductsPage() {
     try {
       setLoading(true);
       const products = [];
+
       const q = query(collection(db, 'products'), where('userId', '==', userId));
       const snap = await getDocs(q);
       
@@ -61,6 +64,7 @@ export default function ProductsPage() {
         });
       });
 
+      console.log('[Products] Loaded', products.length, 'products');
       setAllProducts(products);
       applyFiltersAndSort(products);
     } catch (err) {
@@ -74,6 +78,7 @@ export default function ProductsPage() {
   const applyFiltersAndSort = (products) => {
     let result = [...products];
 
+    // Search filter
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       result = result.filter(p =>
@@ -84,6 +89,7 @@ export default function ProductsPage() {
       );
     }
 
+    // Source filter
     if (filterSource !== 'all') {
       if (filterSource === 'manual') {
         result = result.filter(p => !p.trendingSource && !p.supplier);
@@ -96,6 +102,7 @@ export default function ProductsPage() {
       }
     }
 
+    // Status filter
     if (filterStatus !== 'all') {
       if (filterStatus === 'sale') {
         result = result.filter(p => p.onSale);
@@ -106,6 +113,7 @@ export default function ProductsPage() {
       }
     }
 
+    // Sort
     if (sortBy === 'newest') {
       result.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
     } else if (sortBy === 'price-low') {
@@ -202,7 +210,7 @@ export default function ProductsPage() {
         reviews: 0,
         sales: 0,
         views: 0,
-        onSale: formData.onSale || false,
+        onSale: false,
         userId: user.uid,
         sellerName: user.displayName || user.email,
         createdAt: new Date().toISOString(),
@@ -210,7 +218,7 @@ export default function ProductsPage() {
       });
       
       await loadProducts(user.uid);
-      showNotification('✅ Product added!', 'success');
+      showNotification('Product added!', 'success');
       setShowModal(false);
       setFormData({});
       setImagePreview(null);
@@ -244,7 +252,7 @@ export default function ProductsPage() {
       setShowEditModal(false);
       setFormData({});
       setImagePreview(null);
-      showNotification('✅ Product updated!', 'success');
+      showNotification('Product updated!', 'success');
     } catch (err) {
       console.error('[Products] Error updating:', err);
       showNotification('Error updating product', 'error');
@@ -265,11 +273,6 @@ export default function ProductsPage() {
     });
     setImagePreview(product.image || null);
     setShowEditModal(true);
-  };
-
-  const handleViewClick = (product) => {
-    setSelectedProduct(product);
-    setShowDetails(true);
   };
 
   const handleImageChange = (e) => {
@@ -296,7 +299,9 @@ export default function ProductsPage() {
 
   const handleCopyUrl = (url) => {
     navigator.clipboard.writeText(url);
+    setCopiedUrl(url);
     showNotification('✅ Copied to clipboard!', 'success');
+    setTimeout(() => setCopiedUrl(null), 2000);
   };
 
   const toggleProductSelection = (id) => {
@@ -374,7 +379,6 @@ export default function ProductsPage() {
             onClick={() => {
               setSelectedProduct(null);
               setFormData({ inventory: 100, onSale: false });
-              setImagePreview(null);
               setShowModal(true);
             }}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition flex items-center gap-2"
@@ -397,7 +401,7 @@ export default function ProductsPage() {
           </div>
         )}
 
-        {/* Stats Grid */}
+        {/* Advanced Stats Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-8">
           <div className="bg-slate-800 border border-slate-700 rounded-lg p-3">
             <p className="text-gray-400 text-xs">📦 Total</p>
@@ -472,6 +476,7 @@ export default function ProductsPage() {
         {/* Search, Filter & Sort */}
         <div className="mb-6 space-y-4 bg-slate-800/50 p-6 rounded-lg border border-slate-700">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Search */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">🔍 Search</label>
               <div className="relative">
@@ -486,6 +491,7 @@ export default function ProductsPage() {
               </div>
             </div>
 
+            {/* Source Filter */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">📊 Source</label>
               <select
@@ -501,6 +507,7 @@ export default function ProductsPage() {
               </select>
             </div>
 
+            {/* Status Filter */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">🏷️ Status</label>
               <select
@@ -515,6 +522,7 @@ export default function ProductsPage() {
               </select>
             </div>
 
+            {/* Sort */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">↕️ Sort By</label>
               <select
@@ -537,7 +545,7 @@ export default function ProductsPage() {
         {filteredProducts.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
             {filteredProducts.map((product) => (
-              <div key={product.id} className={`bg-slate-800 rounded-lg border transition ${
+              <div key={product.id} className={`bg-slate-800 rounded-lg border transition cursor-pointer ${
                 selectedProducts.has(product.id) ? 'border-blue-500 ring-2 ring-blue-500/30' : 'border-slate-700 hover:border-blue-500'
               } p-4 flex flex-col`}>
                 {/* Checkbox */}
@@ -546,7 +554,7 @@ export default function ProductsPage() {
                     type="checkbox"
                     checked={selectedProducts.has(product.id)}
                     onChange={() => toggleProductSelection(product.id)}
-                    className="w-5 h-5 rounded cursor-pointer"
+                    className="w-5 h-5 rounded"
                   />
                   {product.onSale && (
                     <span className="bg-red-600 text-white text-xs font-bold px-2 py-1 rounded">SALE</span>
@@ -555,7 +563,7 @@ export default function ProductsPage() {
 
                 {/* Product Image */}
                 {product.image && (
-                  <div className="w-full h-40 overflow-hidden rounded-lg mb-4 bg-slate-700">
+                  <div className="w-full h-40 overflow-hidden rounded-lg mb-4 bg-slate-700 relative">
                     <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
                   </div>
                 )}
@@ -609,25 +617,28 @@ export default function ProductsPage() {
                   )}
                 </div>
 
-                {/* Actions - FULLY FIXED BUTTONS */}
+                {/* Actions */}
                 <div className="flex gap-2 pt-4 border-t border-slate-700 mt-auto">
                   <button
-                    onClick={() => handleViewClick(product)}
-                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded text-sm transition flex items-center justify-center gap-1 cursor-pointer"
+                    onClick={() => {
+                      setSelectedProduct(product);
+                      setShowDetails(true);
+                    }}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded text-sm transition flex items-center justify-center gap-1"
                   >
                     <Eye size={16} />
                     View
                   </button>
                   <button
                     onClick={() => handleEditClick(product)}
-                    className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded text-sm transition flex items-center justify-center gap-1 cursor-pointer"
+                    className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded text-sm transition flex items-center justify-center gap-1"
                   >
                     <Edit size={16} />
                     Edit
                   </button>
                   <button
                     onClick={() => deleteProduct(product.id)}
-                    className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded text-sm transition cursor-pointer"
+                    className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded text-sm transition"
                   >
                     <Trash2 size={16} className="mx-auto" />
                   </button>
@@ -651,169 +662,76 @@ export default function ProductsPage() {
           </div>
         )}
 
-        {/* ADD MODAL - ENHANCED */}
+        {/* Add Modal */}
         {showModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-            <div className="bg-slate-800 rounded-lg border border-slate-700 max-w-2xl w-full my-8">
-              <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 flex items-center justify-between rounded-t-lg">
-                <h2 className="text-2xl font-bold text-white flex items-center gap-2">
-                  <Plus size={24} />
-                  Add New Product
-                </h2>
-                <button
-                  onClick={() => {
-                    setShowModal(false);
-                    setFormData({});
-                    setImagePreview(null);
-                  }}
-                  className="text-white hover:bg-blue-500 rounded-lg p-2 transition"
-                >
-                  <X size={24} />
-                </button>
-              </div>
-
-              <div className="p-6 space-y-6 max-h-[calc(100vh-200px)] overflow-y-auto">
-                {/* Product Image */}
-                <div>
-                  <label className="block text-sm font-semibold text-white mb-3">🖼️ Product Image</label>
-                  {imagePreview ? (
-                    <div className="relative rounded-lg overflow-hidden mb-3">
-                      <img src={imagePreview} alt="Preview" className="w-full h-48 object-cover" />
-                      <button
-                        onClick={() => {
-                          setImagePreview(null);
-                          setFormData({ ...formData, image: '' });
-                        }}
-                        className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg transition"
-                      >
-                        <X size={20} />
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="bg-slate-700/50 border-2 border-dashed border-slate-600 rounded-lg p-6 text-center mb-3 hover:border-blue-500 transition">
-                      <Upload size={32} className="mx-auto text-gray-400 mb-2" />
-                      <p className="text-gray-400 text-sm">Drop image here or click to browse</p>
-                    </div>
-                  )}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleImageChange}
-                    className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500 file:bg-blue-600 file:text-white file:px-4 file:py-2 file:border-0 file:rounded file:cursor-pointer"
-                  />
+            <div className="bg-slate-800 rounded-lg p-6 max-w-md w-full border border-slate-700 my-auto">
+              <h2 className="text-xl font-bold text-white mb-4">➕ Add New Product</h2>
+              <div className="space-y-4">
+                <input
+                  type="text"
+                  placeholder="Product name *"
+                  value={formData.name || ''}
+                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500"
+                />
+                <textarea
+                  placeholder="Description"
+                  value={formData.description || ''}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                  className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500 h-20 resize-none"
+                />
+                <input
+                  type="number"
+                  placeholder="Price *"
+                  value={formData.price || ''}
+                  onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                  className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500"
+                />
+                <input
+                  type="number"
+                  placeholder="Cost"
+                  value={formData.cost || ''}
+                  onChange={(e) => setFormData({ ...formData, cost: e.target.value })}
+                  className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500"
+                />
+                <input
+                  type="number"
+                  placeholder="Inventory"
+                  value={formData.inventory || ''}
+                  onChange={(e) => setFormData({ ...formData, inventory: e.target.value })}
+                  className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500"
+                />
+                <input
+                  type="text"
+                  placeholder="Category"
+                  value={formData.category || ''}
+                  onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                  className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500"
+                />
+                <div className="flex gap-2 pt-4">
+                  <button
+                    onClick={() => {
+                      setShowModal(false);
+                      setFormData({});
+                    }}
+                    className="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-2 rounded transition"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={saveProduct}
+                    className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded transition"
+                  >
+                    Add
+                  </button>
                 </div>
-
-                {/* Basic Info */}
-                <div>
-                  <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
-                    <Package size={20} />
-                    Basic Information
-                  </h3>
-                  <div className="space-y-3">
-                    <input
-                      type="text"
-                      placeholder="Product name *"
-                      value={formData.name || ''}
-                      onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                      className="w-full px-4 py-3 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500 text-sm"
-                    />
-                    <textarea
-                      placeholder="Product description"
-                      value={formData.description || ''}
-                      onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                      className="w-full px-4 py-3 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500 h-24 resize-none text-sm"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Category *"
-                      value={formData.category || ''}
-                      onChange={(e) => setFormData({ ...formData, category: e.target.value })}
-                      className="w-full px-4 py-3 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500 text-sm"
-                    />
-                  </div>
-                </div>
-
-                {/* Pricing */}
-                <div>
-                  <h3 className="text-lg font-bold text-white mb-3 flex items-center gap-2">
-                    <BarChart3 size={20} />
-                    Pricing
-                  </h3>
-                  <div className="space-y-3">
-                    <div className="grid grid-cols-2 gap-3">
-                      <input
-                        type="number"
-                        placeholder="Price *"
-                        step="0.01"
-                        value={formData.price || ''}
-                        onChange={(e) => setFormData({ ...formData, price: e.target.value })}
-                        className="w-full px-4 py-3 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500 text-sm"
-                      />
-                      <input
-                        type="number"
-                        placeholder="Cost"
-                        step="0.01"
-                        value={formData.cost || ''}
-                        onChange={(e) => setFormData({ ...formData, cost: e.target.value })}
-                        className="w-full px-4 py-3 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500 text-sm"
-                      />
-                    </div>
-                    {formData.price && formData.cost && (
-                      <div className="bg-blue-900/30 border border-blue-500/50 rounded-lg p-3">
-                        <p className="text-sm text-blue-200">
-                          💰 Profit: <span className="font-bold text-green-400">${(parseFloat(formData.price) - parseFloat(formData.cost)).toFixed(2)}</span>
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Inventory */}
-                <div>
-                  <h3 className="text-lg font-bold text-white mb-3">📦 Inventory</h3>
-                  <input
-                    type="number"
-                    placeholder="Stock quantity"
-                    value={formData.inventory || ''}
-                    onChange={(e) => setFormData({ ...formData, inventory: e.target.value })}
-                    className="w-full px-4 py-3 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500 text-sm"
-                  />
-                  <label className="flex items-center gap-3 cursor-pointer mt-3 bg-slate-700/50 p-3 rounded-lg">
-                    <input
-                      type="checkbox"
-                      checked={formData.onSale || false}
-                      onChange={(e) => setFormData({ ...formData, onSale: e.target.checked })}
-                      className="w-5 h-5 rounded cursor-pointer"
-                    />
-                    <span className="text-white font-medium">🏷️ Mark as Sale</span>
-                  </label>
-                </div>
-              </div>
-
-              <div className="border-t border-slate-700 bg-slate-900/50 px-6 py-4 flex gap-3 rounded-b-lg">
-                <button
-                  onClick={() => {
-                    setShowModal(false);
-                    setFormData({});
-                    setImagePreview(null);
-                  }}
-                  className="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-3 rounded-lg font-medium transition"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={saveProduct}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-medium transition flex items-center justify-center gap-2"
-                >
-                  <Check size={18} />
-                  Create Product
-                </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* EDIT MODAL */}
+        {/* Edit Modal */}
         {showEditModal && selectedProduct && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
             <div className="bg-slate-800 rounded-lg p-6 max-w-2xl w-full border border-slate-700 my-auto">
@@ -825,13 +743,13 @@ export default function ProductsPage() {
                     setFormData({});
                     setImagePreview(null);
                   }}
-                  className="text-gray-400 hover:text-white text-2xl cursor-pointer"
+                  className="text-gray-400 hover:text-white text-2xl"
                 >
                   ✕
                 </button>
               </div>
 
-              <div className="space-y-4 max-h-96 overflow-y-auto mb-6">
+              <div className="space-y-4 max-h-96 overflow-y-auto">
                 <input
                   type="text"
                   placeholder="Product name"
@@ -880,7 +798,7 @@ export default function ProductsPage() {
                     type="checkbox"
                     checked={formData.onSale || false}
                     onChange={(e) => setFormData({ ...formData, onSale: e.target.checked })}
-                    className="w-4 h-4 rounded cursor-pointer"
+                    className="w-4 h-4 rounded"
                   />
                   <span className="text-white text-sm">Put on Sale</span>
                 </label>
@@ -894,7 +812,7 @@ export default function ProductsPage() {
                           setImagePreview(null);
                           setFormData({ ...formData, image: '' });
                         }}
-                        className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg cursor-pointer"
+                        className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg"
                       >
                         <X size={16} />
                       </button>
@@ -909,85 +827,191 @@ export default function ProductsPage() {
                 </div>
               </div>
 
-              <div className="flex gap-3 pt-6 border-t border-slate-700">
+              <div className="flex gap-3 pt-6 mt-6 border-t border-slate-700">
                 <button
                   onClick={() => {
                     setShowEditModal(false);
                     setFormData({});
                     setImagePreview(null);
                   }}
-                  className="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-2 rounded transition flex items-center justify-center gap-2 cursor-pointer"
+                  className="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-2 rounded transition flex items-center justify-center gap-2"
                 >
                   <X size={16} />
                   Cancel
                 </button>
                 <button
                   onClick={updateProduct}
-                  className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded transition flex items-center justify-center gap-2 cursor-pointer"
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded transition flex items-center justify-center gap-2"
                 >
                   <Save size={16} />
-                  Save
+                  Save Changes
                 </button>
               </div>
             </div>
           </div>
         )}
 
-        {/* DETAILS MODAL */}
+        {/* Details Modal - WITH ALL LINKS & QR CODE */}
         {showDetails && selectedProduct && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-            <div className="bg-slate-800 rounded-lg p-6 max-w-2xl w-full border border-slate-700 my-auto">
+            <div className="bg-slate-800 rounded-lg p-6 max-w-2xl w-full border border-slate-700 my-8">
               <div className="flex items-center justify-between mb-6">
-                <h2 className="text-2xl font-bold text-white">📊 Details</h2>
+                <h2 className="text-2xl font-bold text-white">📊 Product Details</h2>
                 <button
                   onClick={() => setShowDetails(false)}
-                  className="text-gray-400 hover:text-white text-2xl cursor-pointer"
+                  className="text-gray-400 hover:text-white text-2xl"
                 >
                   ✕
                 </button>
               </div>
 
-              {selectedProduct.image && (
-                <div className="mb-6 rounded-lg overflow-hidden">
-                  <img src={selectedProduct.image} alt={selectedProduct.name} className="w-full h-64 object-cover" />
-                </div>
-              )}
+              <div className="space-y-6 max-h-[calc(100vh-200px)] overflow-y-auto">
+                {/* Product Image */}
+                {selectedProduct.image && (
+                  <div className="rounded-lg overflow-hidden">
+                    <img src={selectedProduct.image} alt={selectedProduct.name} className="w-full h-64 object-cover" />
+                  </div>
+                )}
 
-              <div className="space-y-4 mb-6 pb-6 border-b border-slate-700 max-h-96 overflow-y-auto">
-                <div>
-                  <p className="text-sm text-gray-400">Name</p>
-                  <p className="text-2xl font-bold text-white">{selectedProduct.name}</p>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
+                {/* Product Info */}
+                <div className="space-y-4 pb-6 border-b border-slate-700">
                   <div>
-                    <p className="text-sm text-gray-400">Category</p>
-                    <p className="text-white font-semibold">{selectedProduct.category || 'N/A'}</p>
+                    <p className="text-sm text-gray-400">Product Name</p>
+                    <p className="text-2xl font-bold text-white">{selectedProduct.name}</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="bg-slate-700/50 rounded p-3">
+                      <p className="text-sm text-gray-400">Category</p>
+                      <p className="text-white font-semibold">{selectedProduct.category || 'Uncategorized'}</p>
+                    </div>
+                    <div className="bg-slate-700/50 rounded p-3">
+                      <p className="text-sm text-gray-400">Source</p>
+                      <p className="text-white font-semibold">{selectedProduct.sourceLabel}</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-gray-400">Price</p>
+                      <p className="text-xl font-bold text-green-400">${parseFloat(selectedProduct.price || 0).toFixed(2)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-400">Cost</p>
+                      <p className="text-xl font-bold text-orange-400">${parseFloat(selectedProduct.cost || 0).toFixed(2)}</p>
+                    </div>
                   </div>
                   <div>
-                    <p className="text-sm text-gray-400">Price</p>
-                    <p className="text-xl font-bold text-green-400">${parseFloat(selectedProduct.price || 0).toFixed(2)}</p>
+                    <p className="text-sm text-gray-400">Profit Per Sale</p>
+                    <p className="text-xl font-bold text-blue-400">${(parseFloat(selectedProduct.price || 0) - parseFloat(selectedProduct.cost || 0)).toFixed(2)}</p>
                   </div>
                 </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="bg-slate-700/50 rounded p-3 text-center">
-                    <p className="text-xs text-gray-400">Sales</p>
-                    <p className="text-xl font-bold text-yellow-400">{selectedProduct.sales || 0}</p>
+
+                {/* Analytics */}
+                <div className="space-y-4 pb-6 border-b border-slate-700">
+                  <h3 className="text-lg font-bold text-white">📈 Analytics</h3>
+                  <div className="grid grid-cols-4 gap-3">
+                    <div className="bg-slate-700/50 rounded p-3 text-center">
+                      <p className="text-gray-400 text-xs">Sales</p>
+                      <p className="text-2xl font-bold text-yellow-400">{selectedProduct.sales || 0}</p>
+                    </div>
+                    <div className="bg-slate-700/50 rounded p-3 text-center">
+                      <p className="text-gray-400 text-xs">Views</p>
+                      <p className="text-2xl font-bold text-blue-400">{selectedProduct.views || 0}</p>
+                    </div>
+                    <div className="bg-slate-700/50 rounded p-3 text-center">
+                      <p className="text-gray-400 text-xs">Rating</p>
+                      <p className="text-2xl font-bold text-yellow-400">⭐{selectedProduct.rating?.toFixed(1) || '0'}</p>
+                    </div>
+                    <div className="bg-slate-700/50 rounded p-3 text-center">
+                      <p className="text-gray-400 text-xs">Stock</p>
+                      <p className={`text-2xl font-bold ${getInventoryColor(selectedProduct.inventory || 0)}`}>{selectedProduct.inventory || 0}</p>
+                    </div>
                   </div>
-                  <div className="bg-slate-700/50 rounded p-3 text-center">
-                    <p className="text-xs text-gray-400">Views</p>
-                    <p className="text-xl font-bold text-blue-400">{selectedProduct.views || 0}</p>
+                </div>
+
+                {/* Links Section */}
+                <div className="space-y-4 pb-6 border-b border-slate-700">
+                  <h3 className="text-lg font-bold text-white">🔗 Product Links</h3>
+
+                  {/* Direct Link */}
+                  <div className="bg-slate-700/50 rounded-lg p-4">
+                    <p className="text-sm text-gray-400 mb-2">Direct Product Link</p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={generateProductUrl(selectedProduct)}
+                        readOnly
+                        className="flex-1 bg-slate-600 text-blue-400 text-sm px-3 py-2 rounded font-mono"
+                      />
+                      <button
+                        onClick={() => handleCopyUrl(generateProductUrl(selectedProduct))}
+                        className="text-gray-400 hover:text-white transition p-2"
+                      >
+                        <Copy size={20} />
+                      </button>
+                    </div>
                   </div>
-                  <div className="bg-slate-700/50 rounded p-3 text-center">
-                    <p className="text-xs text-gray-400">Stock</p>
-                    <p className="text-xl font-bold text-green-400">{selectedProduct.inventory || 0}</p>
+
+                  {/* Facebook Link */}
+                  <div className="bg-slate-700/50 rounded-lg p-4">
+                    <p className="text-sm text-gray-400 mb-2">📱 Facebook Ads (UTM)</p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={`${generateProductUrl(selectedProduct)}?utm_source=facebook&utm_medium=ads`}
+                        readOnly
+                        className="flex-1 bg-slate-600 text-blue-400 text-xs px-3 py-2 rounded font-mono"
+                      />
+                      <button
+                        onClick={() => handleCopyUrl(`${generateProductUrl(selectedProduct)}?utm_source=facebook&utm_medium=ads`)}
+                        className="text-gray-400 hover:text-white transition p-2"
+                      >
+                        <Copy size={20} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* TikTok Link */}
+                  <div className="bg-slate-700/50 rounded-lg p-4">
+                    <p className="text-sm text-gray-400 mb-2">🎵 TikTok Bio Link</p>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        value={`${generateProductUrl(selectedProduct)}?utm_source=tiktok`}
+                        readOnly
+                        className="flex-1 bg-slate-600 text-blue-400 text-xs px-3 py-2 rounded font-mono"
+                      />
+                      <button
+                        onClick={() => handleCopyUrl(`${generateProductUrl(selectedProduct)}?utm_source=tiktok`)}
+                        className="text-gray-400 hover:text-white transition p-2"
+                      >
+                        <Copy size={20} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* QR Code */}
+                  <div className="bg-slate-700/50 rounded-lg p-4 flex items-center gap-4">
+                    <div>
+                      <p className="text-sm text-gray-400 flex items-center gap-1 mb-1">
+                        <QrCode size={16} />
+                        QR Code
+                      </p>
+                      <p className="text-xs text-gray-500">Scan with phone</p>
+                    </div>
+                    <img
+                      src={generateQRCode(generateProductUrl(selectedProduct))}
+                      alt="QR Code"
+                      className="w-20 h-20 bg-white p-1 rounded"
+                    />
                   </div>
                 </div>
               </div>
 
-              <div className="flex gap-3">
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-6 border-t border-slate-700">
                 <button
                   onClick={() => setShowDetails(false)}
-                  className="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-2 rounded transition cursor-pointer"
+                  className="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-2 rounded transition"
                 >
                   Close
                 </button>
@@ -996,7 +1020,7 @@ export default function ProductsPage() {
                     setShowDetails(false);
                     handleEditClick(selectedProduct);
                   }}
-                  className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded transition flex items-center justify-center gap-2 cursor-pointer"
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded transition flex items-center justify-center gap-2"
                 >
                   <Edit size={16} />
                   Edit
@@ -1006,9 +1030,10 @@ export default function ProductsPage() {
                     deleteProduct(selectedProduct.id);
                     setShowDetails(false);
                   }}
-                  className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded transition cursor-pointer"
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded transition flex items-center justify-center gap-2"
                 >
-                  <Trash2 size={16} className="mx-auto" />
+                  <Trash2 size={16} />
+                  Delete
                 </button>
               </div>
             </div>
