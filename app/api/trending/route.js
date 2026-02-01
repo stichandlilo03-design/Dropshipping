@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server';
 
 export async function GET(request) {
   try {
-    console.log('\n\n========== [API] 🚀 STARTING TRENDING REQUEST ==========\n');
+    console.log('\n========== [API] 🚀 STARTING TRENDING REQUEST ==========\n');
     
     const userId = request.headers.get('x-user-id');
     const integrationsParam = request.headers.get('x-integrations');
@@ -26,10 +26,6 @@ export async function GET(request) {
     try {
       integrations = JSON.parse(integrationsParam);
       console.log('[API] ✅ Parsed integrations:', Object.keys(integrations));
-      console.log('[API] Integration details:');
-      Object.entries(integrations).forEach(([key, value]) => {
-        console.log(`  - ${key}: status=${value?.status}, has_creds=${!!value?.credentials}`);
-      });
     } catch (e) {
       console.log('[API] ❌ PARSE ERROR:', e.message);
       return NextResponse.json({ success: false, error: 'Parse error', products: [] }, { status: 400 });
@@ -69,21 +65,11 @@ export async function GET(request) {
           });
 
           console.log('[API] Response status:', response.status);
-          console.log('[API] Response headers:', {
-            'content-type': response.headers.get('content-type'),
-            'x-request-id': response.headers.get('x-request-id'),
-          });
 
           if (response.ok) {
             const data = await response.json();
             const products = data.products || [];
             console.log('[API] ✅ Shopify returned:', products.length, 'products');
-
-            if (products.length > 0) {
-              products.slice(0, 2).forEach(p => {
-                console.log(`  - ${p.title} (${p.variants?.length} variants)`);
-              });
-            }
 
             const mappedProducts = products.map(p => ({
               id: `shopify_${p.id}`,
@@ -91,19 +77,19 @@ export async function GET(request) {
               supplier: 'Shopify',
               image: p.images?.[0]?.src,
               price: p.variants?.[0]?.price,
+              description: p.description?.substring(0, 150),
               source: 'shopify'
             }));
 
             allProducts = allProducts.concat(mappedProducts);
-            console.log('[API] ✅ Added', mappedProducts.length, 'Shopify products to allProducts');
+            console.log('[API] ✅ Added', mappedProducts.length, 'Shopify products');
           } else {
             const errorText = await response.text();
             console.log('[API] ❌ Shopify error:', response.status);
-            console.log('[API] Error response:', errorText.substring(0, 300));
+            console.log('[API] Error:', errorText.substring(0, 300));
           }
         } catch (err) {
           console.error('[API] ❌ Shopify exception:', err.message);
-          console.error('[API] Stack:', err.stack?.split('\n')[0]);
         }
       }
     } else {
@@ -111,7 +97,7 @@ export async function GET(request) {
     }
 
     // ============================================================================
-    // PRINTFUL
+    // PRINTFUL - NOW WITH STORE ID HEADER
     // ============================================================================
     console.log('\n[API] ========== PRINTFUL ==========');
     
@@ -119,22 +105,65 @@ export async function GET(request) {
       console.log('[API] ✅ Printful connected');
       
       const token = integrations.printful?.credentials?.apiToken;
+      const storeId = integrations.printful?.credentials?.storeId;
+      
       console.log('[API] Token:', token ? `${token.substring(0, 20)}...` : 'MISSING');
-      console.log('[API] Token length:', token?.length);
+      console.log('[API] Store ID:', storeId);
 
       if (token) {
-        // Try custom products
-        console.log('[API] 📋 Fetching custom products...');
+        // STEP 1: Get store info if no store ID is available
+        let finalStoreId = storeId;
+        
+        if (!finalStoreId) {
+          console.log('[API] 📍 No store ID found, fetching store info...');
+          try {
+            const storeInfoResponse = await fetch(
+              'https://api.printful.com/stores',
+              {
+                method: 'GET',
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                },
+              }
+            );
+
+            if (storeInfoResponse.ok) {
+              const storeData = await storeInfoResponse.json();
+              const stores = storeData.result || [];
+              
+              if (stores.length > 0) {
+                finalStoreId = stores[0].id;
+                console.log('[API] ✅ Found store ID:', finalStoreId);
+              } else {
+                console.log('[API] ⚠️ No stores found in account');
+              }
+            }
+          } catch (err) {
+            console.warn('[API] ⚠️ Could not fetch store info:', err.message);
+          }
+        }
+
+        // STEP 2: Try to fetch YOUR custom products
+        console.log('[API] 📋 Fetching YOUR custom products...');
         
         try {
+          const customHeaders = {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          };
+          
+          // Add store ID header if available
+          if (finalStoreId) {
+            customHeaders['X-PF-Store-Id'] = finalStoreId;
+            console.log('[API] Using Store ID header:', finalStoreId);
+          }
+
           const customResponse = await fetch(
-            'https://api.v2.printful.com/store/products?limit=50',
+            'https://api.printful.com/store/products?limit=50',
             {
               method: 'GET',
-              headers: {
-                'Authorization': `Bearer ${token}`,
-                'Content-Type': 'application/json',
-              },
+              headers: customHeaders,
             }
           );
 
@@ -143,31 +172,44 @@ export async function GET(request) {
           if (customResponse.ok) {
             const customData = await customResponse.json();
             const customProducts = customData.result || [];
+            
             console.log('[API] ✅ Found', customProducts.length, 'custom products');
 
-            for (const cp of customProducts.slice(0, 5)) {
+            // Get details for each custom product
+            for (const cp of customProducts.slice(0, 10)) {
               try {
+                const detailHeaders = {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                };
+                
+                if (finalStoreId) {
+                  detailHeaders['X-PF-Store-Id'] = finalStoreId;
+                }
+
                 const detailResponse = await fetch(
-                  `https://api.v2.printful.com/store/products/${cp.id}`,
+                  `https://api.printful.com/store/products/${cp.id}`,
                   {
                     method: 'GET',
-                    headers: {
-                      'Authorization': `Bearer ${token}`,
-                      'Content-Type': 'application/json',
-                    },
+                    headers: detailHeaders,
                   }
                 );
 
                 if (detailResponse.ok) {
                   const detailData = await detailResponse.json();
                   const syncProduct = detailData.result?.sync_product;
+                  const syncVariants = detailData.result?.sync_variants || [];
+                  const firstVariant = syncVariants[0];
                   
-                  if (syncProduct) {
-                    console.log('[API] ✅ Adding custom:', syncProduct.name);
+                  if (syncProduct && firstVariant) {
+                    console.log('[API] ✅ Adding custom product:', syncProduct.name);
                     allProducts.push({
                       id: `printful_custom_${syncProduct.id}`,
                       title: syncProduct.name,
                       supplier: 'Printful (Your Product)',
+                      image: syncProduct.thumbnail_url,
+                      price: firstVariant.retail_price,
+                      description: syncProduct.description?.substring(0, 150),
                       source: 'printful_custom'
                     });
                   }
@@ -177,13 +219,15 @@ export async function GET(request) {
               }
             }
           } else {
-            console.warn('[API] ⚠️ Custom products fetch failed:', customResponse.status);
+            const errorText = await customResponse.text();
+            console.log('[API] ⚠️ Custom products fetch failed:', customResponse.status);
+            console.log('[API] Error:', errorText.substring(0, 200));
           }
         } catch (err) {
           console.warn('[API] ⚠️ Custom products error:', err.message);
         }
 
-        // Try bestsellers
+        // STEP 3: Add Printful bestsellers (public catalog - no store ID needed)
         console.log('[API] 🏆 Fetching bestsellers...');
         
         const bestsellers = [71, 172, 23, 49, 85];
@@ -192,7 +236,7 @@ export async function GET(request) {
         for (const id of bestsellers) {
           try {
             const response = await fetch(
-              `https://api.v2.printful.com/products/${id}`,
+              `https://api.printful.com/products/${id}`,
               {
                 method: 'GET',
                 headers: {
@@ -207,20 +251,21 @@ export async function GET(request) {
             if (response.ok) {
               const data = await response.json();
               const productInfo = data.result?.product;
+              const firstVariant = data.result?.variants?.[0];
               
-              if (productInfo) {
+              if (productInfo && firstVariant) {
                 console.log('[API] ✅ Added bestseller:', productInfo.title);
                 allProducts.push({
                   id: `printful_bestseller_${productInfo.id}`,
                   title: productInfo.title,
                   supplier: 'Printful Bestseller',
+                  image: productInfo.image,
+                  price: parseFloat(firstVariant.price).toFixed(2),
+                  description: productInfo.description?.substring(0, 150),
                   source: 'printful_bestseller'
                 });
                 addedBestsellers++;
               }
-            } else {
-              const errorText = await response.text();
-              console.log(`[API] ❌ Bestseller ${id} error:`, errorText.substring(0, 100));
             }
           } catch (err) {
             console.warn('[API] ⚠️ Bestseller', id, 'error:', err.message);
