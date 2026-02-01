@@ -3,10 +3,10 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Search, Filter, Eye, MoreVertical, Check, Clock, AlertCircle, Trash2, Edit2, Plus, ArrowLeft } from 'lucide-react';
+import { Search, Eye, Trash2, Plus, ArrowLeft } from 'lucide-react';
 import { auth } from '@/lib/firebase';
 import { db } from '@/lib/firebase';
-import { collection, query, where, getDocs, doc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { collection, getDocs, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
 
 export default function Orders() {
@@ -17,8 +17,6 @@ export default function Orders() {
   const [filterStatus, setFilterStatus] = useState('all');
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [showModal, setShowModal] = useState(false);
-  const [editMode, setEditMode] = useState(false);
-  const [formData, setFormData] = useState({});
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(true);
 
@@ -34,31 +32,27 @@ export default function Orders() {
 
       console.log('[Orders] User authenticated:', currentUser.uid);
       setUser(currentUser);
-      await loadOrders(currentUser.uid);
+      await loadOrders();
     });
 
     return () => unsubscribe();
   }, [router]);
 
   // Load orders from Firestore
-  const loadOrders = async (userId) => {
+  const loadOrders = async () => {
     try {
-      console.log('[Orders] Loading orders for user:', userId);
+      console.log('[Orders] Loading orders from Firestore');
       setLoading(true);
 
-      // Query all orders collection (public orders from checkout)
       const ordersRef = collection(db, 'orders');
-      const q = query(ordersRef);
-      const querySnapshot = await getDocs(q);
+      const querySnapshot = await getDocs(ordersRef);
 
       const allOrders = [];
       querySnapshot.forEach((doc) => {
         const orderData = doc.data();
-        // Show all orders - checkout orders show as pending_payment
         allOrders.push({
           id: doc.id,
           ...orderData,
-          profit: (orderData.total || 0) - (orderData.shipping || 0),
         });
       });
 
@@ -68,23 +62,6 @@ export default function Orders() {
     } catch (err) {
       console.error('[Orders] Error loading orders:', err);
       setLoading(false);
-    }
-  };
-
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'completed':
-      case 'paid':
-        return <Check size={16} className="text-green-500" />;
-      case 'processing':
-        return <Clock size={16} className="text-yellow-500" />;
-      case 'shipped':
-        return <Check size={16} className="text-blue-500" />;
-      case 'pending':
-      case 'pending_payment':
-        return <AlertCircle size={16} className="text-orange-500" />;
-      default:
-        return null;
     }
   };
 
@@ -112,7 +89,6 @@ export default function Orders() {
 
   const filteredOrders = orders.filter((order) => {
     const matchesSearch =
-      order.number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       order.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       order.customerEmail?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       order.productName?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -123,14 +99,14 @@ export default function Orders() {
 
   const totalOrders = filteredOrders.length;
   const totalRevenue = filteredOrders.reduce((sum, o) => sum + (o.total || 0), 0);
-  const totalCost = filteredOrders.reduce((sum, o) => sum + (o.shipping || 0), 0);
+  const totalShipping = filteredOrders.reduce((sum, o) => sum + (o.shipping || 0), 0);
   const totalProfit = filteredOrders.reduce((sum, o) => sum + ((o.total || 0) - (o.shipping || 0)), 0);
 
   const deleteOrder = async (id) => {
     try {
       await deleteDoc(doc(db, 'orders', id));
       console.log('[Orders] Order deleted:', id);
-      if (user) await loadOrders(user.uid);
+      await loadOrders();
       setShowModal(false);
     } catch (err) {
       console.error('[Orders] Error deleting order:', err);
@@ -144,18 +120,11 @@ export default function Orders() {
         updatedAt: new Date().toISOString(),
       });
       console.log('[Orders] Order status updated:', id, newStatus);
-      if (user) await loadOrders(user.uid);
+      await loadOrders();
       setShowModal(false);
     } catch (err) {
       console.error('[Orders] Error updating order:', err);
     }
-  };
-
-  const openEditModal = (order) => {
-    setSelectedOrder(order);
-    setFormData(order);
-    setEditMode(true);
-    setShowModal(true);
   };
 
   if (!mounted || loading) {
@@ -183,9 +152,9 @@ export default function Orders() {
       <div className="sticky top-0 z-40 bg-slate-800/50 border-b border-slate-700">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Link href="/dashboard" className="p-2 hover:bg-slate-700 rounded-lg transition">
+            <a href="/" className="p-2 hover:bg-slate-700 rounded-lg transition">
               <ArrowLeft size={20} className="text-gray-400" />
-            </Link>
+            </a>
             <div>
               <h1 className="text-2xl font-bold text-white">📋 Orders</h1>
               <p className="text-xs text-gray-400">Manage customer orders and payments</p>
@@ -206,8 +175,8 @@ export default function Orders() {
             <p className="text-3xl font-bold text-blue-400">${totalRevenue.toFixed(2)}</p>
           </div>
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
-            <p className="text-gray-400 mb-2">Total Shipping Cost</p>
-            <p className="text-3xl font-bold text-orange-400">${totalCost.toFixed(2)}</p>
+            <p className="text-gray-400 mb-2">Total Shipping</p>
+            <p className="text-3xl font-bold text-orange-400">${totalShipping.toFixed(2)}</p>
           </div>
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
             <p className="text-gray-400 mb-2">Total Profit</p>
@@ -267,7 +236,6 @@ export default function Orders() {
                       <td className="px-6 py-4 text-sm text-orange-400">${order.shipping?.toFixed(2)}</td>
                       <td className="px-6 py-4">
                         <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(order.status)}`}>
-                          {getStatusIcon(order.status)}
                           {getDisplayStatus(order.status)}
                         </span>
                       </td>
@@ -276,7 +244,6 @@ export default function Orders() {
                           <button
                             onClick={() => {
                               setSelectedOrder(order);
-                              setEditMode(false);
                               setShowModal(true);
                             }}
                             className="p-2 hover:bg-slate-600 rounded transition"
@@ -298,7 +265,7 @@ export default function Orders() {
                 ) : (
                   <tr>
                     <td colSpan="7" className="px-6 py-8 text-center text-gray-400">
-                      No orders found. {orders.length === 0 && <span>Orders from checkout will appear here.</span>}
+                      No orders found. Orders from checkout will appear here.
                     </td>
                   </tr>
                 )}
