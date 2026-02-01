@@ -21,25 +21,28 @@ export default function ProductPage() {
       try {
         if (!params.id) {
           setError('Product ID not found');
+          setLoading(false);
           return;
         }
+
+        console.log('[Product] Loading:', params.id);
 
         const productRef = doc(db, 'products', params.id);
         const productSnap = await getDoc(productRef);
 
         if (productSnap.exists()) {
-          const data = productSnap.data();
           setProduct({
             id: params.id,
-            ...data,
+            ...productSnap.data(),
           });
-          console.log('[Product Page] Loaded product:', params.id);
+          console.log('[Product] Loaded successfully');
         } else {
           setError('Product not found');
+          console.log('[Product] Not found:', params.id);
         }
       } catch (err) {
-        console.error('[Product Page] Error:', err);
-        setError('Error loading product');
+        console.error('[Product] Error:', err.message);
+        setError('Error loading product - please try again');
       } finally {
         setLoading(false);
       }
@@ -49,7 +52,7 @@ export default function ProductPage() {
   }, [params.id]);
 
   const handleAddToCart = () => {
-    alert(`✅ Added ${quantity} × ${product.name} to cart! Proceed to checkout.`);
+    alert(`✅ Added ${quantity} × ${product.name} to cart!`);
   };
 
   const handleShare = () => {
@@ -72,16 +75,17 @@ export default function ProductPage() {
 
   if (error || !product) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
-        <div className="max-w-7xl mx-auto px-6 py-8">
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
+        <div className="max-w-md mx-auto px-6">
           <Link href="/" className="text-blue-400 hover:underline flex items-center gap-2 mb-8">
             <ArrowLeft size={20} />
-            Back
+            Back Home
           </Link>
 
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-12 text-center">
-            <p className="text-gray-400 text-lg mb-4">❌ {error || 'Product not found'}</p>
-            <p className="text-gray-500 text-sm mb-6">The product you're looking for doesn't exist or has been removed.</p>
+            <p className="text-5xl mb-4">❌</p>
+            <p className="text-gray-400 text-lg mb-4">Product Not Found</p>
+            <p className="text-gray-500 text-sm mb-6">{error || 'The product you are looking for does not exist.'}</p>
             <Link href="/" className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition">
               Go Home
             </Link>
@@ -95,7 +99,7 @@ export default function ProductPage() {
     <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
       {/* Header */}
       <div className="bg-slate-800/50 border-b border-slate-700 sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="max-w-5xl mx-auto px-6 py-4 flex items-center justify-between">
           <Link href="/" className="text-blue-400 hover:text-blue-300 flex items-center gap-2">
             <ArrowLeft size={20} />
             Back
@@ -114,7 +118,7 @@ export default function ProductPage() {
       </div>
 
       <div className="max-w-5xl mx-auto px-6 py-8">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 mb-12">
           {/* Product Image */}
           <div className="flex items-center justify-center">
             <div className="w-full bg-slate-800 rounded-lg overflow-hidden border border-slate-700">
@@ -122,27 +126,27 @@ export default function ProductPage() {
                 <img
                   src={product.image}
                   alt={product.name}
-                  className="w-full h-auto"
+                  className="w-full h-auto max-h-96 object-cover"
                   onError={(e) => {
-                    e.target.src = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22500%22 height=%22500%22%3E%3Crect fill=%22%23374151%22 width=%22500%22 height=%22500%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-family=%22Arial%22 font-size=%2232%22 fill=%22%239CA3AF%22%3ENo Image%3C/text%3E%3C/svg%3E';
+                    e.target.style.display = 'none';
                   }}
                 />
               ) : (
-                <div className="w-full h-96 flex items-center justify-center text-gray-500">
-                  <span className="text-lg">No Image</span>
+                <div className="w-full h-96 flex items-center justify-center bg-slate-700 text-gray-500">
+                  No Image Available
                 </div>
               )}
             </div>
           </div>
 
-          {/* Product Info - CUSTOMER FACING ONLY */}
+          {/* Product Info */}
           <div className="space-y-6">
-            {/* Title & Badge */}
+            {/* Title */}
             <div>
               <div className="flex items-start justify-between mb-3">
                 <h1 className="text-4xl font-bold text-white">{product.name}</h1>
                 {product.badge && (
-                  <span className="bg-yellow-500 text-yellow-900 px-3 py-1 rounded-lg text-sm font-bold animate-pulse">
+                  <span className="bg-yellow-500 text-yellow-900 px-3 py-1 rounded-lg text-sm font-bold">
                     {product.badge}
                   </span>
                 )}
@@ -162,29 +166,29 @@ export default function ProductPage() {
                   ))}
                 </div>
                 <span className="text-gray-400">
-                  <span className="font-bold text-white">{product.rating || 4.5}</span> ({product.reviews} customer reviews)
+                  <span className="font-bold text-white">{product.rating || 4.5}</span> ({product.reviews} reviews)
                 </span>
               </div>
             )}
 
-            {/* Description - ONLY what customer needs */}
+            {/* Description */}
             {product.description && (
               <div>
-                <h3 className="text-lg font-bold text-white mb-3">📝 Product Description</h3>
+                <h3 className="text-lg font-bold text-white mb-3">📝 Description</h3>
                 <p className="text-gray-300 leading-relaxed text-base">{product.description}</p>
               </div>
             )}
 
-            {/* Price - PROMINENT */}
+            {/* Price Box */}
             <div className="bg-gradient-to-r from-green-900/50 to-emerald-900/50 border border-green-500/30 rounded-lg p-8 space-y-4">
-              <div className="space-y-2">
-                <p className="text-gray-400 text-sm">Price</p>
+              <div>
+                <p className="text-gray-400 text-sm mb-2">Price</p>
                 <p className="text-5xl font-bold text-green-400">${parseFloat(product.price || 0).toFixed(2)}</p>
               </div>
 
               {/* Stock Status */}
               {product.inventory !== undefined && (
-                <div className="pt-4 border-t border-green-500/30 space-y-2">
+                <div className="pt-4 border-t border-green-500/30">
                   {product.inventory > 0 ? (
                     <div className="flex items-center gap-3">
                       <div className="w-4 h-4 bg-green-500 rounded-full animate-pulse"></div>
@@ -202,32 +206,32 @@ export default function ProductPage() {
               )}
             </div>
 
-            {/* Quantity Selector */}
+            {/* Quantity */}
             <div className="space-y-3">
               <p className="text-gray-400 font-semibold">Quantity</p>
               <div className="flex items-center gap-6 bg-slate-800 rounded-lg p-4 w-fit border border-slate-700">
                 <button
                   onClick={() => setQuantity(Math.max(1, quantity - 1))}
-                  className="text-gray-400 hover:text-white text-3xl font-bold transition w-8 h-8 flex items-center justify-center"
+                  className="text-gray-400 hover:text-white text-3xl font-bold"
                 >
                   −
                 </button>
                 <span className="text-white font-bold text-2xl w-12 text-center">{quantity}</span>
                 <button
                   onClick={() => setQuantity(quantity + 1)}
-                  className="text-gray-400 hover:text-white text-3xl font-bold transition w-8 h-8 flex items-center justify-center"
+                  className="text-gray-400 hover:text-white text-3xl font-bold"
                 >
                   +
                 </button>
               </div>
             </div>
 
-            {/* Action Buttons */}
+            {/* Buttons */}
             <div className="space-y-3 pt-4">
               <button
                 onClick={handleAddToCart}
                 disabled={product.inventory === 0}
-                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 disabled:cursor-not-allowed text-white py-4 rounded-lg font-bold text-lg transition flex items-center justify-center gap-3"
+                className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white py-4 rounded-lg font-bold text-lg flex items-center justify-center gap-3"
               >
                 <ShoppingCart size={24} />
                 {product.inventory === 0 ? 'Out of Stock' : `Add to Cart - $${(parseFloat(product.price || 0) * quantity).toFixed(2)}`}
@@ -235,17 +239,17 @@ export default function ProductPage() {
 
               <button
                 onClick={handleShare}
-                className="w-full bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-semibold transition flex items-center justify-center gap-2"
+                className="w-full bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-semibold flex items-center justify-center gap-2"
               >
                 {copied ? (
                   <>
                     <Check size={20} className="text-green-400" />
-                    Link Copied!
+                    Copied!
                   </>
                 ) : (
                   <>
                     <Copy size={20} />
-                    Share This Product
+                    Share Product
                   </>
                 )}
               </button>
@@ -257,15 +261,15 @@ export default function ProductPage() {
               <div className="space-y-2 text-sm text-gray-300">
                 <div className="flex items-center gap-2">
                   <span className="text-green-400">✅</span>
-                  <span>100% Authentic Products</span>
+                  <span>100% Authentic</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-green-400">✅</span>
-                  <span>Fast & Free Shipping</span>
+                  <span>Free Shipping</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-green-400">✅</span>
-                  <span>30-Day Money Back Guarantee</span>
+                  <span>30-Day Returns</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-green-400">✅</span>
@@ -276,68 +280,11 @@ export default function ProductPage() {
           </div>
         </div>
 
-        {/* Product Specifications */}
-        {(product.category || product.variants) && (
-          <div className="mt-16 pt-8 border-t border-slate-700">
-            <h3 className="text-2xl font-bold text-white mb-6">📋 Product Details</h3>
-            <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
-              {product.category && (
-                <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
-                  <p className="text-gray-400 text-sm mb-2">Category</p>
-                  <p className="text-white font-semibold">{product.category}</p>
-                </div>
-              )}
-              {product.supplier && (
-                <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
-                  <p className="text-gray-400 text-sm mb-2">Supplier</p>
-                  <p className="text-white font-semibold">{product.supplier}</p>
-                </div>
-              )}
-              {product.variants && (
-                <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
-                  <p className="text-gray-400 text-sm mb-2">Variants</p>
-                  <p className="text-white font-semibold">{product.variants} available</p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Related/Recommended Section */}
-        <div className="mt-16 pt-8 border-t border-slate-700">
-          <h3 className="text-2xl font-bold text-white mb-6">🌟 Customers Also Loved</h3>
-          <p className="text-gray-400 mb-6">Browse more products from our store</p>
-          <Link href="/" className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-semibold transition">
-            Shop More Products →
-          </Link>
-        </div>
-
-        {/* FAQ */}
-        <div className="mt-16 pt-8 border-t border-slate-700">
-          <h3 className="text-2xl font-bold text-white mb-6">❓ FAQ</h3>
-          <div className="space-y-4">
-            <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
-              <p className="text-white font-semibold mb-2">How long does shipping take?</p>
-              <p className="text-gray-400">Most orders arrive within 5-7 business days. International orders may take 2-3 weeks.</p>
-            </div>
-            <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
-              <p className="text-white font-semibold mb-2">Can I return this product?</p>
-              <p className="text-gray-400">Yes! We offer 30-day returns on all products. Full refund if you're not satisfied.</p>
-            </div>
-            <div className="bg-slate-800 rounded-lg p-4 border border-slate-700">
-              <p className="text-white font-semibold mb-2">Is this product authentic?</p>
-              <p className="text-gray-400">100% authentic. All products come directly from official suppliers.</p>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Footer CTA */}
-      <div className="mt-16 bg-slate-800/50 border-t border-slate-700 py-8">
-        <div className="max-w-5xl mx-auto px-6 text-center">
-          <p className="text-gray-400 mb-4">Still have questions? Contact our support team</p>
+        {/* Footer */}
+        <div className="border-t border-slate-700 pt-8 text-center">
+          <p className="text-gray-400 mb-4">Need help?</p>
           <a href="mailto:support@dropshipwithmonk.sbs" className="text-blue-400 hover:underline font-semibold">
-            support@dropshipwithmonk.sbs
+            Contact us: support@dropshipwithmonk.sbs
           </a>
         </div>
       </div>
