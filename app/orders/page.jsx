@@ -4,8 +4,10 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Search, Filter, Eye, MoreVertical, Check, Clock, AlertCircle, Trash2, Edit2, Plus, ArrowLeft } from 'lucide-react';
-import { getUser, getToken } from '@/lib/auth';
-import { db } from '@/lib/database';
+import { auth } from '@/lib/firebase';
+import { db } from '@/lib/firebase';
+import { collection, query, where, getDocs, doc, updateDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
 
 export default function Orders() {
   const router = useRouter();
@@ -18,35 +20,68 @@ export default function Orders() {
   const [editMode, setEditMode] = useState(false);
   const [formData, setFormData] = useState({});
   const [mounted, setMounted] = useState(false);
+  const [loading, setLoading] = useState(true);
 
+  // Check auth and load orders
   useEffect(() => {
     setMounted(true);
-    const currentUser = getUser();
-    const token = getToken();
 
-    if (!currentUser || !token) {
-      router.push('/auth/login');
-      return;
-    }
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (!currentUser) {
+        router.push('/auth/login');
+        return;
+      }
 
-    setUser(currentUser);
-    loadOrders(currentUser.id);
+      console.log('[Orders] User authenticated:', currentUser.uid);
+      setUser(currentUser);
+      await loadOrders(currentUser.uid);
+    });
+
+    return () => unsubscribe();
   }, [router]);
 
-  const loadOrders = (userId) => {
-    const userOrders = db.getOrders(userId);
-    setOrders(userOrders);
+  // Load orders from Firestore
+  const loadOrders = async (userId) => {
+    try {
+      console.log('[Orders] Loading orders for user:', userId);
+      setLoading(true);
+
+      // Query all orders collection (public orders from checkout)
+      const ordersRef = collection(db, 'orders');
+      const q = query(ordersRef);
+      const querySnapshot = await getDocs(q);
+
+      const allOrders = [];
+      querySnapshot.forEach((doc) => {
+        const orderData = doc.data();
+        // Show all orders - checkout orders show as pending_payment
+        allOrders.push({
+          id: doc.id,
+          ...orderData,
+          profit: (orderData.total || 0) - (orderData.shipping || 0),
+        });
+      });
+
+      console.log('[Orders] Loaded orders:', allOrders.length);
+      setOrders(allOrders);
+      setLoading(false);
+    } catch (err) {
+      console.error('[Orders] Error loading orders:', err);
+      setLoading(false);
+    }
   };
 
   const getStatusIcon = (status) => {
     switch (status) {
       case 'completed':
+      case 'paid':
         return <Check size={16} className="text-green-500" />;
       case 'processing':
         return <Clock size={16} className="text-yellow-500" />;
       case 'shipped':
         return <Check size={16} className="text-blue-500" />;
       case 'pending':
+      case 'pending_payment':
         return <AlertCircle size={16} className="text-orange-500" />;
       default:
         return null;
@@ -56,60 +91,64 @@ export default function Orders() {
   const getStatusColor = (status) => {
     switch (status) {
       case 'completed':
+      case 'paid':
         return 'bg-green-500/10 text-green-400';
       case 'processing':
         return 'bg-yellow-500/10 text-yellow-400';
       case 'shipped':
         return 'bg-blue-500/10 text-blue-400';
       case 'pending':
+      case 'pending_payment':
         return 'bg-orange-500/10 text-orange-400';
       default:
         return 'bg-gray-500/10 text-gray-400';
     }
   };
 
+  const getDisplayStatus = (status) => {
+    if (status === 'pending_payment') return 'Pending Payment';
+    return status?.charAt(0).toUpperCase() + status?.slice(1);
+  };
+
   const filteredOrders = orders.filter((order) => {
     const matchesSearch =
       order.number?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.customer?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.email?.toLowerCase().includes(searchTerm.toLowerCase());
+      order.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.customerEmail?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      order.productName?.toLowerCase().includes(searchTerm.toLowerCase());
+    
     const matchesFilter = filterStatus === 'all' || order.status === filterStatus;
     return matchesSearch && matchesFilter;
   });
 
   const totalOrders = filteredOrders.length;
-  const totalRevenue = filteredOrders.reduce((sum, o) => sum + (o.amount || 0), 0);
-  const totalCost = filteredOrders.reduce((sum, o) => sum + (o.cost || 0), 0);
-  const totalProfit = filteredOrders.reduce((sum, o) => sum + (o.profit || 0), 0);
+  const totalRevenue = filteredOrders.reduce((sum, o) => sum + (o.total || 0), 0);
+  const totalCost = filteredOrders.reduce((sum, o) => sum + (o.shipping || 0), 0);
+  const totalProfit = filteredOrders.reduce((sum, o) => sum + ((o.total || 0) - (o.shipping || 0)), 0);
 
-  const deleteOrder = (id) => {
-    db.deleteOrder(id);
-    loadOrders(user.id);
-  };
-
-  const saveOrder = () => {
-    if (editMode && selectedOrder) {
-      db.updateOrder(selectedOrder.id, formData);
-    } else {
-      if (!user) return;
-      const newOrder = {
-        number: `#${Math.floor(Math.random() * 100000)}`,
-        ...formData,
-        status: 'pending',
-      };
-      db.addOrder(newOrder, user.id);
+  const deleteOrder = async (id) => {
+    try {
+      await deleteDoc(doc(db, 'orders', id));
+      console.log('[Orders] Order deleted:', id);
+      if (user) await loadOrders(user.uid);
+      setShowModal(false);
+    } catch (err) {
+      console.error('[Orders] Error deleting order:', err);
     }
-    loadOrders(user.id);
-    setShowModal(false);
-    setEditMode(false);
-    setFormData({});
-    setSelectedOrder(null);
   };
 
-  const updateOrderStatus = (id, newStatus) => {
-    db.updateOrder(id, { status: newStatus });
-    loadOrders(user.id);
-    setShowModal(false);
+  const updateOrderStatus = async (id, newStatus) => {
+    try {
+      await updateDoc(doc(db, 'orders', id), { 
+        status: newStatus,
+        updatedAt: new Date().toISOString(),
+      });
+      console.log('[Orders] Order status updated:', id, newStatus);
+      if (user) await loadOrders(user.uid);
+      setShowModal(false);
+    } catch (err) {
+      console.error('[Orders] Error updating order:', err);
+    }
   };
 
   const openEditModal = (order) => {
@@ -119,61 +158,58 @@ export default function Orders() {
     setShowModal(true);
   };
 
-  const openAddModal = () => {
-    setSelectedOrder(null);
-    setFormData({ customer: '', email: '', amount: '', cost: '', items: '', address: '' });
-    setEditMode(false);
-    setShowModal(true);
-  };
-
-  if (!mounted || !user) {
+  if (!mounted || loading) {
     return (
-      <div className="min-h-screen bg-primary flex items-center justify-center">
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
         <div className="text-center">
-          <div className="w-12 h-12 border-4 border-accent border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-400">Loading orders...</p>
         </div>
       </div>
     );
   }
 
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+        <p className="text-gray-400">Loading...</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="min-h-screen bg-primary">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
       {/* Header */}
-      <div className="sticky top-0 z-40 bg-secondary border-b border-gray-700">
+      <div className="sticky top-0 z-40 bg-slate-800/50 border-b border-slate-700">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Link href="/" className="p-2 hover:bg-gray-700 rounded-lg transition">
+            <Link href="/dashboard" className="p-2 hover:bg-slate-700 rounded-lg transition">
               <ArrowLeft size={20} className="text-gray-400" />
             </Link>
             <div>
-              <h1 className="text-2xl font-bold text-white">Orders</h1>
-              <p className="text-xs text-gray-400">Manage and track all orders</p>
+              <h1 className="text-2xl font-bold text-white">📋 Orders</h1>
+              <p className="text-xs text-gray-400">Manage customer orders and payments</p>
             </div>
           </div>
-          <button onClick={openAddModal} className="btn btn-primary flex items-center gap-2">
-            <Plus size={20} />
-            Add Order
-          </button>
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
         {/* Summary Stats */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <div className="card">
+          <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
             <p className="text-gray-400 mb-2">Total Orders</p>
             <p className="text-3xl font-bold text-white">{totalOrders}</p>
           </div>
-          <div className="card">
+          <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
             <p className="text-gray-400 mb-2">Total Revenue</p>
-            <p className="text-3xl font-bold text-accent">${totalRevenue.toFixed(2)}</p>
+            <p className="text-3xl font-bold text-blue-400">${totalRevenue.toFixed(2)}</p>
           </div>
-          <div className="card">
-            <p className="text-gray-400 mb-2">Total Cost</p>
+          <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
+            <p className="text-gray-400 mb-2">Total Shipping Cost</p>
             <p className="text-3xl font-bold text-orange-400">${totalCost.toFixed(2)}</p>
           </div>
-          <div className="card">
+          <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
             <p className="text-gray-400 mb-2">Total Profit</p>
             <p className="text-3xl font-bold text-green-400">${totalProfit.toFixed(2)}</p>
           </div>
@@ -185,8 +221,8 @@ export default function Orders() {
             <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" />
             <input
               type="text"
-              placeholder="Search by order number, customer name, or email..."
-              className="input-field pl-10"
+              placeholder="Search by customer, email, or product..."
+              className="w-full px-4 py-2 pl-10 bg-slate-800 text-white border border-slate-700 rounded-lg focus:outline-none focus:border-blue-500"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -194,10 +230,11 @@ export default function Orders() {
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
-            className="input-field"
+            className="px-4 py-2 bg-slate-800 text-white border border-slate-700 rounded-lg focus:outline-none focus:border-blue-500"
           >
             <option value="all">All Status</option>
-            <option value="pending">Pending</option>
+            <option value="pending_payment">Pending Payment</option>
+            <option value="paid">Paid</option>
             <option value="processing">Processing</option>
             <option value="shipped">Shipped</option>
             <option value="completed">Completed</option>
@@ -205,18 +242,16 @@ export default function Orders() {
         </div>
 
         {/* Orders Table */}
-        <div className="card overflow-hidden">
+        <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
-                <tr className="border-b border-gray-700">
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Order</th>
+                <tr className="border-b border-slate-700 bg-slate-900/50">
                   <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Customer</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Product</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Email</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Revenue</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Cost</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Profit</th>
-                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Items</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Total</th>
+                  <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Shipping</th>
                   <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Status</th>
                   <th className="px-6 py-3 text-right text-sm font-semibold text-gray-400">Action</th>
                 </tr>
@@ -224,18 +259,16 @@ export default function Orders() {
               <tbody>
                 {filteredOrders.length > 0 ? (
                   filteredOrders.map((order) => (
-                    <tr key={order.id} className="border-b border-gray-700 hover:bg-gray-800/50 transition">
-                      <td className="px-6 py-4 text-sm font-semibold text-white">{order.number}</td>
-                      <td className="px-6 py-4 text-sm text-gray-300">{order.customer}</td>
-                      <td className="px-6 py-4 text-sm text-gray-300">{order.email}</td>
-                      <td className="px-6 py-4 text-sm font-semibold text-accent">${order.amount?.toFixed(2)}</td>
-                      <td className="px-6 py-4 text-sm text-orange-400">${order.cost?.toFixed(2)}</td>
-                      <td className="px-6 py-4 text-sm font-semibold text-green-400">${order.profit?.toFixed(2)}</td>
-                      <td className="px-6 py-4 text-sm text-gray-300">{order.items}</td>
+                    <tr key={order.id} className="border-b border-slate-700 hover:bg-slate-700/50 transition">
+                      <td className="px-6 py-4 text-sm font-semibold text-white">{order.customerName}</td>
+                      <td className="px-6 py-4 text-sm text-gray-300">{order.productName}</td>
+                      <td className="px-6 py-4 text-sm text-gray-300">{order.customerEmail}</td>
+                      <td className="px-6 py-4 text-sm font-semibold text-blue-400">${order.total?.toFixed(2)}</td>
+                      <td className="px-6 py-4 text-sm text-orange-400">${order.shipping?.toFixed(2)}</td>
                       <td className="px-6 py-4">
                         <span className={`inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(order.status)}`}>
                           {getStatusIcon(order.status)}
-                          {order.status?.charAt(0).toUpperCase() + order.status?.slice(1)}
+                          {getDisplayStatus(order.status)}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right">
@@ -243,24 +276,17 @@ export default function Orders() {
                           <button
                             onClick={() => {
                               setSelectedOrder(order);
-                              setShowModal(true);
                               setEditMode(false);
+                              setShowModal(true);
                             }}
-                            className="p-2 hover:bg-gray-700 rounded transition"
+                            className="p-2 hover:bg-slate-600 rounded transition"
                             title="View"
                           >
                             <Eye size={16} className="text-gray-400" />
                           </button>
                           <button
-                            onClick={() => openEditModal(order)}
-                            className="p-2 hover:bg-gray-700 rounded transition"
-                            title="Edit"
-                          >
-                            <Edit2 size={16} className="text-gray-400" />
-                          </button>
-                          <button
                             onClick={() => deleteOrder(order.id)}
-                            className="p-2 hover:bg-gray-700 rounded transition"
+                            className="p-2 hover:bg-slate-600 rounded transition"
                             title="Delete"
                           >
                             <Trash2 size={16} className="text-red-400" />
@@ -271,8 +297,8 @@ export default function Orders() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan="9" className="px-6 py-8 text-center text-gray-400">
-                      No orders found. {orders.length === 0 && <span>Start by adding your first order!</span>}
+                    <td colSpan="7" className="px-6 py-8 text-center text-gray-400">
+                      No orders found. {orders.length === 0 && <span>Orders from checkout will appear here.</span>}
                     </td>
                   </tr>
                 )}
@@ -282,17 +308,14 @@ export default function Orders() {
         </div>
 
         {/* Modal */}
-        {showModal && (
+        {showModal && selectedOrder && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="card max-w-2xl w-full max-h-96 overflow-y-auto">
+            <div className="bg-slate-800 rounded-lg max-w-2xl w-full border border-slate-700 p-8 max-h-96 overflow-y-auto">
               <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold text-white">
-                  {editMode ? 'Edit Order' : selectedOrder ? 'Order Details' : 'Add New Order'}
-                </h2>
+                <h2 className="text-2xl font-bold text-white">Order Details</h2>
                 <button
                   onClick={() => {
                     setShowModal(false);
-                    setEditMode(false);
                     setSelectedOrder(null);
                   }}
                   className="text-gray-400 hover:text-white text-2xl"
@@ -301,128 +324,86 @@ export default function Orders() {
                 </button>
               </div>
 
-              {!selectedOrder || editMode ? (
-                <div className="space-y-4">
-                  <input
-                    type="text"
-                    placeholder="Customer Name"
-                    className="input-field"
-                    value={formData.customer || ''}
-                    onChange={(e) => setFormData({ ...formData, customer: e.target.value })}
-                  />
-                  <input
-                    type="email"
-                    placeholder="Email"
-                    className="input-field"
-                    value={formData.email || ''}
-                    onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  />
-                  <input
-                    type="number"
-                    placeholder="Amount ($)"
-                    className="input-field"
-                    value={formData.amount || ''}
-                    onChange={(e) => setFormData({ ...formData, amount: parseFloat(e.target.value) })}
-                  />
-                  <input
-                    type="number"
-                    placeholder="Cost ($)"
-                    className="input-field"
-                    value={formData.cost || ''}
-                    onChange={(e) => setFormData({ ...formData, cost: parseFloat(e.target.value) })}
-                  />
-                  <input
-                    type="number"
-                    placeholder="Items"
-                    className="input-field"
-                    value={formData.items || ''}
-                    onChange={(e) => setFormData({ ...formData, items: parseInt(e.target.value) })}
-                  />
-                  <input
-                    type="text"
-                    placeholder="Address"
-                    className="input-field"
-                    value={formData.address || ''}
-                    onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  />
-                  <div className="flex gap-2 pt-4">
-                    <button
-                      onClick={() => {
-                        setShowModal(false);
-                        setEditMode(false);
-                      }}
-                      className="flex-1 btn btn-secondary"
-                    >
-                      Cancel
-                    </button>
-                    <button onClick={saveOrder} className="flex-1 btn btn-primary">
-                      {editMode ? 'Update' : 'Save'}
-                    </button>
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-gray-400 text-sm">Customer</p>
+                    <p className="text-white font-semibold">{selectedOrder.customerName}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400 text-sm">Email</p>
+                    <p className="text-white font-semibold">{selectedOrder.customerEmail}</p>
                   </div>
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <p className="text-gray-400 text-sm">Customer</p>
-                      <p className="text-white font-semibold">{selectedOrder.customer}</p>
-                    </div>
-                    <div>
-                      <p className="text-gray-400 text-sm">Email</p>
-                      <p className="text-white font-semibold">{selectedOrder.email}</p>
-                    </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <p className="text-gray-400 text-sm">Phone</p>
+                    <p className="text-white font-semibold">{selectedOrder.customerPhone}</p>
                   </div>
-                  <div className="border-t border-gray-700 pt-4">
-                    <p className="text-gray-400 text-sm mb-2">Financial Details</p>
-                    <div className="grid grid-cols-3 gap-4">
-                      <div>
-                        <p className="text-gray-400 text-xs">Revenue</p>
-                        <p className="text-accent text-lg font-bold">${selectedOrder.amount?.toFixed(2)}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-400 text-xs">Cost</p>
-                        <p className="text-orange-400 text-lg font-bold">${selectedOrder.cost?.toFixed(2)}</p>
-                      </div>
-                      <div>
-                        <p className="text-gray-400 text-xs">Profit</p>
-                        <p className="text-green-400 text-lg font-bold">${selectedOrder.profit?.toFixed(2)}</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="border-t border-gray-700 pt-4">
-                    <p className="text-gray-400 text-sm mb-3">Update Status</p>
-                    <div className="flex gap-2">
-                      {['pending', 'processing', 'shipped', 'completed'].map(status => (
-                        <button
-                          key={status}
-                          onClick={() => updateOrderStatus(selectedOrder.id, status)}
-                          className={`flex-1 py-2 px-3 rounded text-sm font-semibold transition ${
-                            selectedOrder.status === status
-                              ? 'bg-accent text-white'
-                              : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
-                          }`}
-                        >
-                          {status.charAt(0).toUpperCase() + status.slice(1)}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex gap-2 pt-4 border-t border-gray-700">
-                    <button
-                      onClick={() => setShowModal(false)}
-                      className="flex-1 btn btn-secondary"
-                    >
-                      Close
-                    </button>
-                    <button
-                      onClick={() => openEditModal(selectedOrder)}
-                      className="flex-1 btn btn-primary"
-                    >
-                      Edit
-                    </button>
+                  <div>
+                    <p className="text-gray-400 text-sm">Product</p>
+                    <p className="text-white font-semibold">{selectedOrder.productName}</p>
                   </div>
                 </div>
-              )}
+
+                <div>
+                  <p className="text-gray-400 text-sm">Address</p>
+                  <p className="text-white font-semibold">{selectedOrder.customerAddress}</p>
+                </div>
+
+                <div className="border-t border-slate-700 pt-4">
+                  <p className="text-gray-400 text-sm mb-3">Financial Details</p>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div>
+                      <p className="text-gray-400 text-xs">Subtotal</p>
+                      <p className="text-blue-400 text-lg font-bold">${selectedOrder.subtotal?.toFixed(2)}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400 text-xs">Tax</p>
+                      <p className="text-yellow-400 text-lg font-bold">${selectedOrder.tax?.toFixed(2)}</p>
+                    </div>
+                    <div>
+                      <p className="text-gray-400 text-xs">Total</p>
+                      <p className="text-green-400 text-lg font-bold">${selectedOrder.total?.toFixed(2)}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-700 pt-4">
+                  <p className="text-gray-400 text-sm mb-3">Update Status</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {['pending_payment', 'paid', 'processing', 'shipped', 'completed'].map(status => (
+                      <button
+                        key={status}
+                        onClick={() => updateOrderStatus(selectedOrder.id, status)}
+                        className={`py-2 px-3 rounded text-sm font-semibold transition ${
+                          selectedOrder.status === status
+                            ? 'bg-blue-600 text-white'
+                            : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+                        }`}
+                      >
+                        {getDisplayStatus(status)}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex gap-2 pt-4 border-t border-slate-700">
+                  <button
+                    onClick={() => setShowModal(false)}
+                    className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg font-semibold transition"
+                  >
+                    Close
+                  </button>
+                  <button
+                    onClick={() => deleteOrder(selectedOrder.id)}
+                    className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg font-semibold transition"
+                  >
+                    Delete Order
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -430,4 +411,3 @@ export default function Orders() {
     </div>
   );
 }
-
