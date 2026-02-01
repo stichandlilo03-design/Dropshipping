@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { doc, getDoc, addDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, getDoc, addDoc, collection, getDocs, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { ArrowLeft, Star, ShoppingCart, Heart, Copy, Check, Truck, Shield, RefreshCw, Mail, AlertCircle, Loader, X, Plus, Minus, TrendingUp, Eye, Zap, Lock, CreditCard, Trash2 } from 'lucide-react';
 
@@ -68,19 +68,22 @@ export default function ProductPage() {
           setProduct(productData);
           await loadRelatedProducts(productData);
 
-          // Increment view count
+          // Increment view count directly in Firestore
           try {
             const currentViews = productData.views || 0;
-            await fetch('/api/product/view', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                productId: params.id,
-                newViews: currentViews + 1,
-              }),
-            }).catch(err => console.log('[Views] Error:', err));
+            await updateDoc(productRef, {
+              views: currentViews + 1,
+              lastViewed: new Date().toISOString(),
+            });
+            
+            // Update local state to show new view count
+            setProduct(prev => ({
+              ...prev,
+              views: currentViews + 1
+            }));
           } catch (err) {
-            console.log('[Views] Failed to increment:', err);
+            console.log('[Views] Note: Could not update views:', err.message);
+            // Don't fail the page load if views update fails
           }
         } else {
           setError('Product not found');
