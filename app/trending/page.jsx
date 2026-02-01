@@ -1,296 +1,302 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { getTrendingProductsPage, searchTrendingProducts, filterBySupplier } from '@/lib/trending';
+import { useAuth } from '@/lib/auth';
 import Link from 'next/link';
-import { ArrowLeft, TrendingUp, Filter, RefreshCw, LogOut, Share2, Plus } from 'lucide-react';
-import { auth } from '@/lib/firebase';
-import { signOut } from 'firebase/auth';
-import { fetchTrendingProducts } from '@/lib/trending';
 
 export default function TrendingPage() {
-  const router = useRouter();
-  const [user, setUser] = useState(null);
+  const { user } = useAuth();
   const [products, setProducts] = useState([]);
-  const [connectedApis, setConnectedApis] = useState([]);
-  const [requiredApis, setRequiredApis] = useState([]);
+  const [filteredProducts, setFilteredProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [selectedCategory, setSelectedCategory] = useState('all');
+  const [error, setError] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterSupplier, setFilterSupplier] = useState('all');
   const [sortBy, setSortBy] = useState('trending');
-  const [notification, setNotification] = useState('');
 
+  // Load products on mount
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
-      if (!currentUser) {
-        router.push('/auth/login');
-        return;
+    if (!user?.uid) return;
+
+    const loadProducts = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+
+        console.log('[Trending Page] Loading products for user:', user.uid);
+
+        const result = await getTrendingProductsPage(user.uid);
+
+        if (result.success && result.products) {
+          console.log('[Trending Page] ✅ Loaded:', result.products.length, 'products');
+          setProducts(result.products || []);
+          setFilteredProducts(result.products || []);
+        } else {
+          console.error('[Trending Page] ❌ Failed:', result.error);
+          setError(result.error || 'Failed to load products');
+          setProducts([]);
+          setFilteredProducts([]);
+        }
+      } catch (err) {
+        console.error('[Trending Page] ❌ Error:', err.message);
+        setError(err.message || 'An error occurred');
+        setProducts([]);
+        setFilteredProducts([]);
+      } finally {
+        setLoading(false);
       }
+    };
 
-      setUser(currentUser);
-      await loadTrendingProducts(currentUser.uid);
-      setLoading(false);
-    });
+    loadProducts();
+  }, [user]);
 
-    return () => unsubscribe();
-  }, [router]);
-
-  const loadTrendingProducts = async (userId) => {
-    try {
-      console.log('[Trending Page] 📥 Fetching trending products...');
-      const result = await fetchTrendingProducts(userId);
-      
-      if (result.success) {
-        console.log('[Trending Page] ✅ Got', result.products.length, 'products');
-        setProducts(result.products);
-        setConnectedApis(result.connectedApis);
-        setRequiredApis(result.requiredApis);
-      } else {
-        console.error('[Trending Page] ❌ Error:', result.error);
-        showNotification('❌ Failed to load trending products', 'error');
-      }
-    } catch (error) {
-      console.error('[Trending Page] ❌ Error:', error);
-      showNotification('❌ Error loading trending products', 'error');
+  // Apply filters and search
+  useEffect(() => {
+    if (!products) {
+      setFilteredProducts([]);
+      return;
     }
+
+    let result = [...products];
+
+    // Apply search
+    if (searchTerm) {
+      result = searchTrendingProducts(result, searchTerm);
+    }
+
+    // Apply supplier filter
+    if (filterSupplier !== 'all') {
+      result = filterBySupplier(result, filterSupplier);
+    }
+
+    // Apply sort
+    if (sortBy === 'price-low') {
+      result.sort((a, b) => (parseFloat(a.price) || 0) - (parseFloat(b.price) || 0));
+    } else if (sortBy === 'price-high') {
+      result.sort((a, b) => (parseFloat(b.price) || 0) - (parseFloat(a.price) || 0));
+    } else if (sortBy === 'name') {
+      result.sort((a, b) => (a.title || '').localeCompare(b.title || ''));
+    }
+
+    setFilteredProducts(result);
+  }, [products, searchTerm, filterSupplier, sortBy]);
+
+  const getSupplierColor = (supplier) => {
+    if (supplier?.includes('Shopify')) return 'bg-green-100 text-green-800';
+    if (supplier?.includes('Printful')) return 'bg-blue-100 text-blue-800';
+    return 'bg-gray-100 text-gray-800';
   };
 
-  const handleRefresh = async () => {
-    if (!user) return;
-    setRefreshing(true);
-    await loadTrendingProducts(user.uid);
-    setRefreshing(false);
-    showNotification('✅ Refreshed trending products', 'success');
-  };
-
-  const handleAddToStore = (product) => {
-    console.log('Adding to store:', product);
-    showNotification(`✅ Added "${product.title}" to store`, 'success');
-  };
-
-  const handleShare = (product) => {
-    console.log('Sharing:', product);
-    showNotification(`✅ Shared "${product.title}"`, 'success');
-  };
-
-  const showNotification = (message, type = 'info') => {
-    setNotification(message);
-    setTimeout(() => setNotification(''), 4000);
-  };
-
-  const handleLogout = async () => {
-    await signOut(auth);
-    router.push('/auth/login');
-  };
-
-  // Get unique categories from products
-  const categories = ['all', ...new Set(products.map(p => p.type || 'Other'))];
-
-  // Filter and sort products
-  let filteredProducts = selectedCategory === 'all' 
-    ? products 
-    : products.filter(p => (p.type || 'Other') === selectedCategory);
-
-  if (sortBy === 'price-low') {
-    filteredProducts = [...filteredProducts].sort((a, b) => (a.price || 0) - (b.price || 0));
-  } else if (sortBy === 'price-high') {
-    filteredProducts = [...filteredProducts].sort((a, b) => (b.price || 0) - (a.price || 0));
-  }
-
-  if (loading || !user) {
+  if (!user) {
     return (
-      <div className="min-h-screen bg-primary flex items-center justify-center">
-        <div className="text-center">
-          <div className="w-12 h-12 border-4 border-accent border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-400">Loading...</p>
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-4">
+        <div className="text-center text-white">
+          <p className="text-xl mb-4">Please log in to view trending products</p>
+          <Link href="/auth/login" className="text-blue-400 hover:underline">
+            Go to Login
+          </Link>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-primary">
-      {/* Header */}
-      <div className="sticky top-0 z-40 bg-secondary border-b border-gray-700">
-        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link href="/" className="p-2 hover:bg-gray-700 rounded-lg">
-              <ArrowLeft size={20} className="text-gray-400" />
-            </Link>
-            <div>
-              <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-                <TrendingUp size={24} className="text-accent" />
-                Trending Products
-              </h1>
-              <p className="text-xs text-gray-400">Discover trending items from connected platforms</p>
-            </div>
-          </div>
-          <button onClick={handleLogout} className="p-2 text-red-400">
-            <LogOut size={20} />
-          </button>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 p-4 sm:p-6 lg:p-8">
+      <div className="max-w-7xl mx-auto">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-4xl font-bold text-white mb-2">🔥 Trending Products</h1>
+          <p className="text-gray-300">Products from your connected suppliers</p>
         </div>
-      </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
-        {/* Notification */}
-        {notification && (
-          <div className={`p-4 rounded-lg ${
-            notification.includes('✅') 
-              ? 'bg-green-500/10 border border-green-500/30 text-green-400'
-              : 'bg-red-500/10 border border-red-500/30 text-red-400'
-          }`}>
-            {notification}
+        {/* Error State */}
+        {error && (
+          <div className="mb-6 p-4 bg-red-900/30 border border-red-500 rounded-lg text-red-200">
+            <p className="font-semibold">❌ Error</p>
+            <p className="text-sm mt-1">{error}</p>
           </div>
         )}
 
-        {/* Status */}
-        <div className="grid md:grid-cols-2 gap-4">
-          {connectedApis.length > 0 && (
-            <div className="card bg-green-500/10 border border-green-500/30">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse"></div>
-                <h3 className="font-bold text-green-400">✅ Connected APIs</h3>
-              </div>
-              <p className="text-sm text-gray-300">{connectedApis.join(', ')}</p>
+        {/* Loading State */}
+        {loading && (
+          <div className="text-center py-12">
+            <div className="inline-block">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+              <p className="text-white mt-4">Loading products...</p>
             </div>
-          )}
-
-          {requiredApis.length > 0 && (
-            <div className="card bg-blue-500/10 border border-blue-500/30">
-              <div className="flex items-center gap-2 mb-2">
-                <div className="w-2 h-2 bg-blue-400 rounded-full"></div>
-                <h3 className="font-bold text-blue-400">📌 Connect More</h3>
-              </div>
-              <div className="flex items-center justify-between">
-                <p className="text-sm text-gray-300">
-                  {requiredApis.join(', ')} to see more products
-                </p>
-                <Link href="/integrations" className="text-blue-400 hover:text-blue-300 text-sm">
-                  Connect
-                </Link>
-              </div>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
 
         {/* Controls */}
-        <div className="card space-y-4">
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div className="flex items-center gap-2">
-              <Filter size={16} className="text-gray-400" />
-              <select
-                value={selectedCategory}
-                onChange={(e) => setSelectedCategory(e.target.value)}
-                className="bg-gray-700 text-white text-sm px-3 py-2 rounded border border-gray-600"
-              >
-                {categories.map(cat => (
-                  <option key={cat} value={cat}>
-                    {cat === 'all' ? 'All Categories' : cat}
-                  </option>
-                ))}
-              </select>
+        {!loading && products.length > 0 && (
+          <div className="mb-8 bg-slate-800/50 p-6 rounded-lg border border-slate-700">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Search */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Search</label>
+                <input
+                  type="text"
+                  placeholder="Search products..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500"
+                />
+              </div>
 
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                className="bg-gray-700 text-white text-sm px-3 py-2 rounded border border-gray-600"
-              >
-                <option value="trending">Trending</option>
-                <option value="price-low">Price: Low to High</option>
-                <option value="price-high">Price: High to Low</option>
-              </select>
+              {/* Filter by Supplier */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Supplier</label>
+                <select
+                  value={filterSupplier}
+                  onChange={(e) => setFilterSupplier(e.target.value)}
+                  className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500"
+                >
+                  <option value="all">All Suppliers</option>
+                  <option value="Shopify">Shopify</option>
+                  <option value="Printful">Printful</option>
+                </select>
+              </div>
+
+              {/* Sort */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-2">Sort By</label>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500"
+                >
+                  <option value="trending">Trending</option>
+                  <option value="price-low">Price: Low to High</option>
+                  <option value="price-high">Price: High to Low</option>
+                  <option value="name">Name</option>
+                </select>
+              </div>
             </div>
-
-            <button
-              onClick={handleRefresh}
-              disabled={refreshing}
-              className="flex items-center gap-2 btn btn-secondary text-sm disabled:opacity-50"
-            >
-              <RefreshCw size={16} className={refreshing ? 'animate-spin' : ''} />
-              Refresh
-            </button>
           </div>
-
-          <p className="text-sm text-gray-400">
-            Showing {filteredProducts.length} of {products.length} products
-          </p>
-        </div>
+        )}
 
         {/* Products Grid */}
-        {filteredProducts.length > 0 ? (
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredProducts.map(product => (
-              <div key={product.id} className="card group hover:border-accent transition overflow-hidden">
-                {/* Image */}
-                {product.image && (
-                  <div className="mb-4 bg-gray-700 rounded overflow-hidden h-48">
-                    <img
-                      src={product.image}
-                      alt={product.title}
-                      className="w-full h-full object-cover group-hover:scale-105 transition"
-                    />
-                  </div>
-                )}
-
-                {/* Content */}
-                <div className="space-y-3">
-                  <div>
-                    <h3 className="font-bold text-white line-clamp-2 mb-2">{product.title}</h3>
-                    <div className="flex gap-2 flex-wrap">
-                      <span className="text-xs bg-accent/20 text-accent px-2 py-1 rounded">
-                        {product.supplier}
-                      </span>
-                      {product.type && (
-                        <span className="text-xs bg-gray-700 text-gray-300 px-2 py-1 rounded">
-                          {product.type}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {product.description && (
-                    <p className="text-sm text-gray-400 line-clamp-2">{product.description}</p>
-                  )}
-
-                  {product.price && (
-                    <p className="font-bold text-accent text-lg">${product.price}</p>
-                  )}
-
-                  {/* Actions */}
-                  <div className="flex gap-2 pt-2">
-                    <button
-                      onClick={() => handleAddToStore(product)}
-                      className="flex-1 btn btn-primary text-sm flex items-center justify-center gap-1"
-                    >
-                      <Plus size={14} />
-                      Add
-                    </button>
-                    <button
-                      onClick={() => handleShare(product)}
-                      className="flex-1 btn btn-secondary text-sm flex items-center justify-center gap-1"
-                    >
-                      <Share2 size={14} />
-                      Share
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div className="card text-center py-16">
-            <TrendingUp size={48} className="mx-auto text-gray-600 mb-4" />
-            <h3 className="font-bold text-white mb-2 text-lg">No Trending Products</h3>
+        {!loading && filteredProducts.length > 0 && (
+          <div>
             <p className="text-gray-400 mb-6">
-              {connectedApis.length === 0
-                ? 'Connect Printful, Shopify, or TikTok to see trending products'
-                : 'No products match your filter'}
+              Showing {filteredProducts.length} of {products.length} products
             </p>
-            {connectedApis.length === 0 && (
-              <Link href="/integrations" className="btn btn-primary">
-                Connect APIs Now
-              </Link>
-            )}
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {filteredProducts.map((product) => {
+                try {
+                  return (
+                    <div
+                      key={product.id}
+                      className="bg-slate-800 rounded-lg overflow-hidden hover:transform hover:scale-105 transition-all duration-300 border border-slate-700 hover:border-blue-500 flex flex-col h-full"
+                    >
+                      {/* Product Image */}
+                      <div className="relative h-48 bg-slate-700 overflow-hidden">
+                        {product.image ? (
+                          <img
+                            src={product.image}
+                            alt={product.title}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              e.target.src = 'data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22100%22 height=%22100%22%3E%3Crect fill=%22%23374151%22 width=%22100%22 height=%22100%22/%3E%3Ctext x=%2250%25%22 y=%2250%25%22 dominant-baseline=%22middle%22 text-anchor=%22middle%22 font-family=%22Arial%22 font-size=%2214%22 fill=%22%239CA3AF%22%3ENo Image%3C/text%3E%3C/svg%3E';
+                            }}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-gray-500">
+                            No Image
+                          </div>
+                        )}
+
+                        {/* Badge */}
+                        {product.badge && (
+                          <div className="absolute top-2 right-2 bg-yellow-500 text-yellow-900 px-2 py-1 rounded text-xs font-semibold">
+                            {product.badge}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Product Info */}
+                      <div className="p-4 flex-grow flex flex-col">
+                        {/* Title */}
+                        <h3 className="font-semibold text-white text-sm line-clamp-2 mb-2">
+                          {product.title || 'Untitled Product'}
+                        </h3>
+
+                        {/* Supplier Badge */}
+                        <div className="mb-3">
+                          <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${getSupplierColor(product.supplier)}`}>
+                            {product.supplier || 'Unknown'}
+                          </span>
+                        </div>
+
+                        {/* Description */}
+                        {product.description && (
+                          <p className="text-gray-400 text-xs mb-3 line-clamp-2">
+                            {product.description}
+                          </p>
+                        )}
+
+                        {/* Price */}
+                        <div className="mb-4 mt-auto">
+                          <p className="text-lg font-bold text-green-400">
+                            ${parseFloat(product.price || 0).toFixed(2)}
+                          </p>
+                          {product.currency && product.currency !== 'USD' && (
+                            <p className="text-xs text-gray-500">{product.currency}</p>
+                          )}
+                        </div>
+
+                        {/* Variants */}
+                        {product.variants && (
+                          <p className="text-xs text-gray-500 mb-4">
+                            {product.variants} variant{product.variants !== 1 ? 's' : ''}
+                          </p>
+                        )}
+
+                        {/* Action Button */}
+                        <button
+                          onClick={() => {
+                            alert(
+                              `Added "${product.title}" to your store!\n\nProduct ID: ${product.id}\nSupplier: ${product.supplier}\nPrice: $${parseFloat(product.price || 0).toFixed(2)}`
+                            );
+                          }}
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-medium transition-colors"
+                        >
+                          📦 Add to Store
+                        </button>
+                      </div>
+                    </div>
+                  );
+                } catch (err) {
+                  console.error('[Product Card] Error rendering product:', product.id, err);
+                  return null;
+                }
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Empty State */}
+        {!loading && filteredProducts.length === 0 && products.length > 0 && (
+          <div className="text-center py-12">
+            <p className="text-gray-400 text-lg">No products match your filters</p>
+          </div>
+        )}
+
+        {/* No Products State */}
+        {!loading && products.length === 0 && !error && (
+          <div className="text-center py-12 bg-slate-800/50 rounded-lg border border-slate-700 p-8">
+            <p className="text-gray-400 text-lg mb-4">No trending products available yet</p>
+            <p className="text-gray-500 text-sm mb-6">
+              Make sure your Shopify and Printful integrations are connected
+            </p>
+            <Link
+              href="/integrations"
+              className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition-colors"
+            >
+              Go to Integrations
+            </Link>
           </div>
         )}
       </div>
