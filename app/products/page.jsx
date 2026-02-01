@@ -3,11 +3,11 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { collection, getDocs, deleteDoc, doc, addDoc, query, where } from 'firebase/firestore';
+import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { auth } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { Search, Plus, Trash2, Eye, ArrowLeft, Package, Copy, Check, AlertCircle, QrCode } from 'lucide-react';
+import { Search, Plus, Trash2, Eye, ArrowLeft, Package, Copy, Edit, Check, AlertCircle, QrCode, Save, X } from 'lucide-react';
 
 export default function ProductsPage() {
   const router = useRouter();
@@ -19,10 +19,13 @@ export default function ProductsPage() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editMode, setEditMode] = useState(false);
   const [formData, setFormData] = useState({});
   const [loading, setLoading] = useState(true);
   const [copiedUrl, setCopiedUrl] = useState(null);
   const [notification, setNotification] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -134,6 +137,68 @@ export default function ProductsPage() {
     }
   };
 
+  const updateProduct = async () => {
+    if (!formData.name) {
+      showNotification('Product name required', 'error');
+      return;
+    }
+    try {
+      const productRef = doc(db, 'products', selectedProduct.id);
+      await updateDoc(productRef, {
+        name: formData.name,
+        description: formData.description,
+        price: parseFloat(formData.price) || 0,
+        cost: parseFloat(formData.cost) || 0,
+        inventory: parseInt(formData.inventory) || 0,
+        image: formData.image,
+        category: formData.category,
+        updatedAt: new Date().toISOString(),
+      });
+
+      // Update local state
+      const updated = allProducts.map(p =>
+        p.id === selectedProduct.id ? { ...p, ...formData } : p
+      );
+      setAllProducts(updated);
+      setSelectedProduct(null);
+      setShowEditModal(false);
+      setFormData({});
+      setImagePreview(null);
+      showNotification('Product updated!', 'success');
+    } catch (err) {
+      console.error('Error updating:', err);
+      showNotification('Error updating product', 'error');
+    }
+  };
+
+  const handleEditClick = (product) => {
+    setSelectedProduct(product);
+    setFormData({
+      name: product.name,
+      description: product.description || '',
+      price: product.price || '',
+      cost: product.cost || '',
+      inventory: product.inventory || 100,
+      image: product.image || '',
+      category: product.category || '',
+    });
+    setImagePreview(product.image || null);
+    setShowEditModal(true);
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = reader.result;
+        setImagePreview(base64String);
+        setFormData({ ...formData, image: base64String });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
   const generateProductUrl = (product) => {
     if (typeof window === 'undefined') return '';
     return `${window.location.origin}/p/${product.id || Date.now()}`;
@@ -187,13 +252,14 @@ export default function ProductsPage() {
             </Link>
             <div>
               <h1 className="text-4xl font-bold text-white">📦 Products</h1>
-              <p className="text-gray-300">Manual + Trending + API products in one place</p>
+              <p className="text-gray-300">Manage all your products - create, edit, delete</p>
             </div>
           </div>
           <button
             onClick={() => {
               setSelectedProduct(null);
               setFormData({ status: 'active', inventory: 100 });
+              setEditMode(false);
               setShowModal(true);
             }}
             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium transition flex items-center gap-2"
@@ -331,14 +397,14 @@ export default function ProductsPage() {
                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded text-sm transition flex items-center justify-center gap-1"
                   >
                     <Eye size={16} />
-                    Details
+                    View
                   </button>
                   <button
-                    onClick={() => handleCopyUrl(generateProductUrl(product))}
-                    className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded text-sm transition flex items-center justify-center gap-1"
+                    onClick={() => handleEditClick(product)}
+                    className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded text-sm transition flex items-center justify-center gap-1"
                   >
-                    <Copy size={16} />
-                    Link
+                    <Edit size={16} />
+                    Edit
                   </button>
                   <button
                     onClick={() => deleteProduct(product.id)}
@@ -387,8 +453,8 @@ export default function ProductsPage() {
 
         {/* Add Modal */}
         {showModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-slate-800 rounded-lg p-6 max-w-md w-full border border-slate-700">
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+            <div className="bg-slate-800 rounded-lg p-6 max-w-md w-full border border-slate-700 my-auto">
               <h2 className="text-xl font-bold text-white mb-4">Add New Product</h2>
               <div className="space-y-4">
                 <input
@@ -444,14 +510,162 @@ export default function ProductsPage() {
           </div>
         )}
 
+        {/* Edit Modal */}
+        {showEditModal && selectedProduct && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+            <div className="bg-slate-800 rounded-lg p-6 max-w-2xl w-full border border-slate-700 my-auto">
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-2xl font-bold text-white">✏️ Edit Product</h2>
+                <button
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setFormData({});
+                    setImagePreview(null);
+                  }}
+                  className="text-gray-400 hover:text-white text-2xl"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-4 max-h-96 overflow-y-auto">
+                {/* Product Name */}
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">Product Name</label>
+                  <input
+                    type="text"
+                    value={formData.name || ''}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Description */}
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">Description</label>
+                  <textarea
+                    value={formData.description || ''}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500 h-24 resize-none"
+                  />
+                </div>
+
+                {/* Price */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-2">💰 Price</label>
+                    <input
+                      type="number"
+                      value={formData.price || ''}
+                      onChange={(e) => setFormData({ ...formData, price: e.target.value })}
+                      className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm text-gray-400 mb-2">📉 Cost</label>
+                    <input
+                      type="number"
+                      value={formData.cost || ''}
+                      onChange={(e) => setFormData({ ...formData, cost: e.target.value })}
+                      className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Inventory */}
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">📦 Inventory</label>
+                  <input
+                    type="number"
+                    value={formData.inventory || ''}
+                    onChange={(e) => setFormData({ ...formData, inventory: e.target.value })}
+                    className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Category */}
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">📂 Category</label>
+                  <input
+                    type="text"
+                    value={formData.category || ''}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                    className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Image */}
+                <div>
+                  <label className="block text-sm text-gray-400 mb-2">🖼️ Product Image</label>
+                  {imagePreview && (
+                    <div className="mb-3 relative">
+                      <img src={imagePreview} alt="Preview" className="w-full h-40 object-cover rounded-lg" />
+                      <button
+                        onClick={() => {
+                          setImagePreview(null);
+                          setFormData({ ...formData, image: '' });
+                        }}
+                        className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white p-2 rounded-lg"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+                  )}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageChange}
+                    className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:border-blue-500 file:bg-blue-600 file:text-white file:px-4 file:py-2 file:border-0 file:rounded file:cursor-pointer"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">Upload new image or leave empty to keep current</p>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-6 mt-6 border-t border-slate-700">
+                <button
+                  onClick={() => {
+                    setShowEditModal(false);
+                    setFormData({});
+                    setImagePreview(null);
+                  }}
+                  className="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-2 rounded transition flex items-center justify-center gap-2"
+                >
+                  <X size={16} />
+                  Cancel
+                </button>
+                <button
+                  onClick={updateProduct}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded transition flex items-center justify-center gap-2"
+                >
+                  <Save size={16} />
+                  Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Details Modal */}
         {showDetails && selectedProduct && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
             <div className="bg-slate-800 rounded-lg p-6 max-w-2xl w-full border border-slate-700 my-auto">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-bold text-white">📊 Product Details</h2>
-                <button onClick={() => setShowDetails(false)} className="text-gray-400 hover:text-white text-2xl">✕</button>
+                <button
+                  onClick={() => setShowDetails(false)}
+                  className="text-gray-400 hover:text-white text-2xl"
+                >
+                  ✕
+                </button>
               </div>
+
+              {/* Product Image */}
+              {selectedProduct.image && (
+                <div className="mb-6 rounded-lg overflow-hidden">
+                  <img src={selectedProduct.image} alt={selectedProduct.name} className="w-full h-64 object-cover" />
+                </div>
+              )}
 
               {/* Product Info */}
               <div className="space-y-4 mb-6 pb-6 border-b border-slate-700">
@@ -562,7 +776,20 @@ export default function ProductsPage() {
                   Close
                 </button>
                 <button
-                  onClick={() => deleteProduct(selectedProduct.id)}
+                  onClick={() => {
+                    setShowDetails(false);
+                    handleEditClick(selectedProduct);
+                  }}
+                  className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded transition flex items-center justify-center gap-2"
+                >
+                  <Edit size={16} />
+                  Edit Product
+                </button>
+                <button
+                  onClick={() => {
+                    deleteProduct(selectedProduct.id);
+                    setShowDetails(false);
+                  }}
                   className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded transition flex items-center justify-center gap-2"
                 >
                   <Trash2 size={16} />
