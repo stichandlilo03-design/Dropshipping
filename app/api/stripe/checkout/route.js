@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, doc, getDoc } from 'firebase/firestore';
 
-// Initialize Firebase Admin SDK for server-side access
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -31,16 +30,16 @@ export async function POST(request) {
       tax,
     } = body;
 
-    console.log('[Stripe Dynamic] Creating checkout for order:', orderId);
-    console.log('[Stripe Dynamic] Product ID:', productId);
+    console.log('[Stripe Checkout] Creating checkout for order:', orderId);
+    console.log('[Stripe Checkout] Product ID:', productId);
 
-    // STEP 1: Get product from Firestore to find admin
-    console.log('[Stripe Dynamic] Fetching product details...');
+    // STEP 1: Get product from Firestore to find owner
+    console.log('[Stripe Checkout] Fetching product details...');
     const productRef = doc(db, 'products', productId);
     const productSnap = await getDoc(productRef);
 
     if (!productSnap.exists()) {
-      console.error('[Stripe Dynamic] Product not found:', productId);
+      console.error('[Stripe Checkout] Product not found:', productId);
       return NextResponse.json(
         {
           success: false,
@@ -53,52 +52,71 @@ export async function POST(request) {
     const productData = productSnap.data();
     const adminUserId = productData.userId;
 
-    console.log('[Stripe Dynamic] Product owner (admin) ID:', adminUserId);
+    console.log('[Stripe Checkout] Product owner ID:', adminUserId);
 
-    // STEP 2: Get admin's Stripe keys from their profile
-    console.log('[Stripe Dynamic] Fetching admin Stripe keys...');
-    const adminRef = doc(db, 'users', adminUserId, 'integrations', 'stripe');
-    const adminSnap = await getDoc(adminRef);
+    // STEP 2: Get admin's Stripe integration from their settings
+    console.log('[Stripe Checkout] Fetching admin Stripe integration...');
+    
+    // The integrations are stored at: /users/{userId}/integrations/stripe
+    const stripeIntegrationRef = doc(db, `users/${adminUserId}/integrations/stripe`);
+    const stripeIntegrationSnap = await getDoc(stripeIntegrationRef);
 
-    if (!adminSnap.exists()) {
-      console.error('[Stripe Dynamic] Admin has no Stripe keys configured:', adminUserId);
+    if (!stripeIntegrationSnap.exists()) {
+      console.error('[Stripe Checkout] Admin has no Stripe integration:', adminUserId);
       return NextResponse.json(
         {
           success: false,
-          error: 'Product owner has not configured Stripe payment processing',
+          error: 'Product owner has not configured Stripe payment processing. Please contact the store.',
         },
         { status: 400 }
       );
     }
 
-    const stripeData = adminSnap.data();
-    const stripeSecretKey = stripeData.secretKey;
+    const integrationData = stripeIntegrationSnap.data();
+    console.log('[Stripe Checkout] Integration data found:', integrationData.integrationId);
+
+    // STEP 3: Extract Stripe credentials
+    // The credentials are nested under: integrationData.credentials.secretKey
+    let stripeSecretKey = null;
+
+    // Try credentials.secretKey first (new format)
+    if (integrationData.credentials && integrationData.credentials.secretKey) {
+      stripeSecretKey = integrationData.credentials.secretKey;
+      console.log('[Stripe Checkout] Found secretKey in credentials.secretKey');
+    }
+    // Try direct secretKey (old format)
+    else if (integrationData.secretKey) {
+      stripeSecretKey = integrationData.secretKey;
+      console.log('[Stripe Checkout] Found secretKey directly on integration');
+    }
 
     if (!stripeSecretKey) {
-      console.error('[Stripe Dynamic] Admin Stripe secret key is empty:', adminUserId);
+      console.error('[Stripe Checkout] No Stripe secret key found in integration data');
+      console.log('[Stripe Checkout] Integration structure:', Object.keys(integrationData));
       return NextResponse.json(
         {
           success: false,
-          error: 'Product owner Stripe configuration is incomplete',
+          error: 'Stripe integration incomplete. Secret key not found.',
         },
         { status: 400 }
       );
     }
 
-    console.log('[Stripe Dynamic] Using admin Stripe account:', stripeData.accountId || 'N/A');
+    console.log('[Stripe Checkout] ✅ Retrieved Stripe secret key');
 
-    // STEP 3: Create Stripe instance with admin's key
+    // STEP 4: Initialize Stripe
     const Stripe = require('stripe');
     const stripe = new Stripe(stripeSecretKey);
+    console.log('[Stripe Checkout] Stripe initialized');
 
-    // STEP 4: Calculate totals in cents
+    // STEP 5: Calculate totals in cents
     const unitPriceInCents = Math.round(parseFloat(productPrice) * 100);
     const subtotalInCents = unitPriceInCents * quantity;
     const shippingInCents = Math.round(parseFloat(shippingCost) * 100);
     const taxInCents = Math.round(parseFloat(tax) * 100);
     const totalInCents = subtotalInCents + shippingInCents + taxInCents;
 
-    console.log('[Stripe Dynamic] Price breakdown:', {
+    console.log('[Stripe Checkout] Totals:', {
       unitPrice: unitPriceInCents,
       subtotal: subtotalInCents,
       shipping: shippingInCents,
@@ -106,13 +124,15 @@ export async function POST(request) {
       total: totalInCents,
     });
 
-    // STEP 5: Get base URL
+    // STEP 6: Get base URL
     const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 
                     (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 
-    console.log('[Stripe Dynamic] Base URL:', baseUrl);
+    console.log('[Stripe Checkout] Base URL:', baseUrl);
 
-    // STEP 6: Create Stripe checkout session
+    // STEP 7: Create Stripe checkout session
+    console.log('[Stripe Checkout] Creating Stripe session...');
+    
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
       customer_email: customerEmail,
@@ -127,7 +147,6 @@ export async function POST(request) {
               metadata: {
                 orderId: orderId,
                 productId: productId,
-                adminId: adminUserId,
               },
             },
             unit_amount: unitPriceInCents,
@@ -169,8 +188,8 @@ export async function POST(request) {
       },
     });
 
-    console.log('[Stripe Dynamic] Session created:', session.id);
-    console.log('[Stripe Dynamic] Checkout URL:', session.url);
+    console.log('[Stripe Checkout] ✅ Session created:', session.id);
+    console.log('[Stripe Checkout] Checkout URL:', session.url);
 
     return NextResponse.json({
       success: true,
@@ -180,8 +199,8 @@ export async function POST(request) {
     });
 
   } catch (error) {
-    console.error('[Stripe Dynamic] Error:', error.message);
-    console.error('[Stripe Dynamic] Full error:', error);
+    console.error('[Stripe Checkout] Error:', error.message);
+    console.error('[Stripe Checkout] Stack:', error.stack);
     
     return NextResponse.json(
       {
