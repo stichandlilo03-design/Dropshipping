@@ -61,51 +61,55 @@ export default function Dashboard() {
 
       console.log('[Dashboard] Loading data for userId:', userId);
 
-      // Load orders (ALL orders from Firestore, not filtered by userId)
+      // STEP 1: Load orders FIRST
+      let loadedOrders = [];
       try {
         console.log('[Dashboard] Fetching all orders from /orders collection');
         const ordersRef = collection(firebaseDb, 'orders');
         const ordersSnap = await getDocs(ordersRef);
-        const ordersData = ordersSnap.docs.map(doc => ({
+        loadedOrders = ordersSnap.docs.map(doc => ({
           id: doc.id,
           ...doc.data(),
         }));
-        console.log('[Dashboard] Orders loaded:', ordersData.length);
-        setOrders(ordersData);
-        
-        // Calculate stats with orders
-        calculateStats(ordersData, products, stats.trendingAdded);
+        console.log('[Dashboard] Orders loaded:', loadedOrders.length);
+        setOrders(loadedOrders);
       } catch (ordersError) {
         console.error('[Dashboard] Error loading orders:', ordersError);
+        loadedOrders = [];
         setOrders([]);
       }
 
-      // Load products
+      // STEP 2: Load products
+      let loadedProducts = [];
       try {
         const productsQuery = query(
           collection(firebaseDb, 'products'),
           where('userId', '==', userId)
         );
         const productsSnap = await getDocs(productsQuery);
-        const productsData = productsSnap.docs.map(doc => ({
+        loadedProducts = productsSnap.docs.map(doc => ({
           id: doc.id,
           ...doc.data(),
         }));
-        console.log('[Dashboard] Products loaded:', productsData.length);
-        setProducts(productsData);
+        console.log('[Dashboard] Products loaded:', loadedProducts.length);
+        setProducts(loadedProducts);
 
         // Count products added from trending
-        const trendingCount = productsData.filter(p => p.trendingSource).length;
+        const trendingCount = loadedProducts.filter(p => p.trendingSource).length;
         console.log('[Dashboard] Products from trending:', trendingCount);
 
-        // Calculate stats with new products data
-        calculateStats(orders, productsData, trendingCount);
+        // Calculate stats with loaded orders and products
+        calculateStats(loadedOrders, loadedProducts, trendingCount);
       } catch (productsError) {
         console.error('[Dashboard] Error loading products:', productsError);
+        loadedProducts = [];
         setProducts([]);
+        
+        // Still calculate stats even if products fail
+        calculateStats(loadedOrders, [], 0);
       }
 
-      // Load integrations
+      // STEP 3: Load integrations
       try {
         const integrationsData = {};
         const integrationsQuery = query(
@@ -126,7 +130,7 @@ export default function Dashboard() {
         setFeatureStatus({});
       }
 
-      // Load trending products
+      // STEP 4: Load trending products
       await loadTrendingProducts(userId);
     } catch (error) {
       console.error('[Dashboard] Error loading data:', error);
@@ -229,7 +233,7 @@ export default function Dashboard() {
       const profitMargin = totalRevenue > 0 ? Math.round((totalProfit / totalRevenue) * 100) : 0;
       const avgOrderValue = ordersData.length > 0 ? (totalRevenue / ordersData.length).toFixed(2) : 0;
 
-      console.log('[Dashboard] Stats calculated - Revenue:', totalRevenue, 'Orders:', ordersData.length);
+      console.log('[Dashboard] Stats calculated - Revenue:', totalRevenue, 'Orders:', ordersData.length, 'Profit:', totalProfit);
 
       setStats({
         totalRevenue: totalRevenue.toFixed(2),
