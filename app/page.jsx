@@ -4,12 +4,12 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DollarSign, ShoppingCart, Package, TrendingUp, Zap, Users, LogOut, Settings, Download, BookOpen, ArrowRight, Plus, Flame, Smartphone, Share2, Link as LinkIcon, Eye, AlertCircle, CheckCircle, Clock, Lock } from 'lucide-react';
+import { DollarSign, ShoppingCart, Package, TrendingUp, Zap, Users, LogOut, Settings, Download, BookOpen, ArrowRight, Plus, Flame, AlertCircle, CheckCircle, Clock, Lock, ArrowLeft } from 'lucide-react';
 import { auth } from '@/lib/firebase';
 import { signOut } from 'firebase/auth';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db as firebaseDb } from '@/lib/firebase';
-import { fetchTrendingProducts } from '@/lib/trending';
+import { fetchTrendingProducts, addTrendingProductToStore } from '@/lib/trending';
 
 export default function Dashboard() {
   const router = useRouter();
@@ -19,8 +19,12 @@ export default function Dashboard() {
   const [integrations, setIntegrations] = useState({});
   const [trendingProducts, setTrendingProducts] = useState([]);
   const [trendingLoading, setTrendingLoading] = useState(false);
+  const [trendingError, setTrendingError] = useState(null);
+  const [trendingStats, setTrendingStats] = useState({ shopify: 0, printful_custom: 0, printful_bestseller: 0 });
   const [loading, setLoading] = useState(true);
   const [featureStatus, setFeatureStatus] = useState({});
+  const [addingProduct, setAddingProduct] = useState(null);
+  const [addMessage, setAddMessage] = useState(null);
   const [stats, setStats] = useState({
     totalRevenue: 0,
     totalProfit: 0,
@@ -29,6 +33,7 @@ export default function Dashboard() {
     totalProducts: 0,
     profitMargin: 0,
     avgOrderValue: 0,
+    trendingAdded: 0,
   });
 
   useEffect(() => {
@@ -54,7 +59,7 @@ export default function Dashboard() {
         return;
       }
 
-      console.log('Loading data for userId:', userId);
+      console.log('[Dashboard] Loading data for userId:', userId);
 
       // Load orders
       try {
@@ -67,11 +72,10 @@ export default function Dashboard() {
           id: doc.id,
           ...doc.data(),
         }));
-        console.log('Orders loaded:', ordersData.length);
+        console.log('[Dashboard] Orders loaded:', ordersData.length);
         setOrders(ordersData);
-        calculateStats(ordersData, products);
       } catch (ordersError) {
-        console.error('Error loading orders:', ordersError);
+        console.error('[Dashboard] Error loading orders:', ordersError);
         setOrders([]);
       }
 
@@ -86,11 +90,16 @@ export default function Dashboard() {
           id: doc.id,
           ...doc.data(),
         }));
-        console.log('Products loaded:', productsData.length);
+        console.log('[Dashboard] Products loaded:', productsData.length);
         setProducts(productsData);
-        calculateStats(orders, productsData);
+
+        // Count products added from trending
+        const trendingCount = productsData.filter(p => p.trendingSource).length;
+        console.log('[Dashboard] Products from trending:', trendingCount);
+
+        calculateStats(orders, productsData, trendingCount);
       } catch (productsError) {
-        console.error('Error loading products:', productsError);
+        console.error('[Dashboard] Error loading products:', productsError);
         setProducts([]);
       }
 
@@ -104,21 +113,21 @@ export default function Dashboard() {
         integrationsSnap.forEach(doc => {
           integrationsData[doc.id] = doc.data();
         });
-        console.log('Integrations loaded:', Object.keys(integrationsData).length);
+        console.log('[Dashboard] Integrations loaded:', Object.keys(integrationsData).length);
         setIntegrations(integrationsData);
 
-        // Calculate feature availability based on connected APIs
+        // Calculate feature availability
         calculateFeatureStatus(integrationsData);
       } catch (integrationsError) {
-        console.error('Error loading integrations:', integrationsError);
+        console.error('[Dashboard] Error loading integrations:', integrationsError);
         setIntegrations({});
         setFeatureStatus({});
       }
 
-      // Load trending products using CLIENT-SIDE function
+      // Load trending products
       await loadTrendingProducts(userId);
     } catch (error) {
-      console.error('Error loading data:', error);
+      console.error('[Dashboard] Error loading data:', error);
     } finally {
       setLoading(false);
     }
@@ -128,21 +137,51 @@ export default function Dashboard() {
     try {
       console.log('[Dashboard] 📥 Fetching trending products...');
       setTrendingLoading(true);
+      setTrendingError(null);
       
       const result = await fetchTrendingProducts(userId);
       
       if (result.success) {
         console.log('[Dashboard] ✅ Got trending products:', result.products.length);
         setTrendingProducts(result.products);
+        setTrendingStats(result.stats || {});
       } else {
         console.error('[Dashboard] ❌ Error:', result.error);
+        setTrendingError(result.error);
         setTrendingProducts([]);
+        setTrendingStats({});
       }
     } catch (error) {
       console.error('[Dashboard] ❌ Error loading trending:', error);
+      setTrendingError(error.message);
       setTrendingProducts([]);
     } finally {
       setTrendingLoading(false);
+    }
+  };
+
+  const handleAddProductToStore = async (product) => {
+    try {
+      setAddingProduct(product.id);
+      const result = await addTrendingProductToStore(user.uid, product);
+
+      if (result.success) {
+        setAddMessage({ type: 'success', text: result.message });
+        
+        // Reload products to show new count
+        setTimeout(async () => {
+          await loadData(user.uid);
+          setAddMessage(null);
+        }, 1500);
+      } else {
+        setAddMessage({ type: 'error', text: result.errors?.[0] || 'Failed to add product' });
+        setTimeout(() => setAddMessage(null), 3000);
+      }
+    } catch (err) {
+      setAddMessage({ type: 'error', text: err.message });
+      setTimeout(() => setAddMessage(null), 3000);
+    } finally {
+      setAddingProduct(null);
     }
   };
 
@@ -154,99 +193,31 @@ export default function Dashboard() {
       }
     });
 
-    console.log('Connected APIs:', Object.keys(connected));
+    console.log('[Dashboard] Connected APIs:', Object.keys(connected));
 
-    // Define feature dependencies
     const features = {
       trendingProducts: {
-        required: ['printful', 'shopify'],
-        optional: ['tiktok'],
-        available: (connected[`printful`] || false) && ((connected[`shopify`] || false) || (connected[`tiktok`] || false)),
-        missingAPIs: [],
+        available: connected['printful'] || connected['shopify'],
+        missingAPIs: (!connected['printful'] && !connected['shopify']) ? ['Shopify or Printful'] : [],
       },
-      
       orders: {
-        required: ['shopify'],
-        optional: ['tiktok'],
-        available: (connected[`shopify`] || false) || (connected[`tiktok`] || false),
-        missingAPIs: [],
+        available: connected['shopify'],
+        missingAPIs: !connected['shopify'] ? ['Shopify'] : [],
       },
-      
       products: {
-        required: ['shopify'],
-        optional: ['tiktok'],
-        available: (connected[`shopify`] || false) || (connected[`tiktok`] || false),
-        missingAPIs: [],
+        available: connected['shopify'],
+        missingAPIs: !connected['shopify'] ? ['Shopify'] : [],
       },
-      
       analytics: {
-        required: ['shopify'],
-        optional: ['tiktok'],
-        available: (connected[`shopify`] || false) || (connected[`tiktok`] || false),
-        missingAPIs: [],
-      },
-      
-      socialPublish: {
-        required: ['tiktok'],
-        optional: ['printful'],
-        available: connected[`tiktok`] || false,
-        missingAPIs: !connected[`tiktok`] ? ['TikTok'] : [],
-      },
-      
-      productManager: {
-        required: ['shopify'],
-        optional: ['tiktok'],
-        available: (connected[`shopify`] || false) || (connected[`tiktok`] || false),
-        missingAPIs: [],
-      },
-      
-      marketing: {
-        required: ['shopify', 'stripe'],
-        optional: ['tiktok'],
-        available: (connected[`shopify`] || false) && (connected[`stripe`] || false),
-        missingAPIs: [],
-      },
-      
-      revenue: {
-        required: ['stripe'],
-        optional: [],
-        available: connected[`stripe`] || false,
-        missingAPIs: !connected[`stripe`] ? ['Stripe'] : [],
-      },
-      
-      emailNotifications: {
-        required: ['gmail-smtp'],
-        optional: [],
-        available: connected[`gmail-smtp`] || false,
-        missingAPIs: !connected[`gmail-smtp`] ? ['Gmail SMTP'] : [],
+        available: connected['shopify'],
+        missingAPIs: !connected['shopify'] ? ['Shopify'] : [],
       },
     };
 
-    // Calculate missing APIs for each feature
-    Object.keys(features).forEach(feature => {
-      const required = features[feature].required;
-      
-      features[feature].missingAPIs = required
-        .filter(api => !connected[api])
-        .map(api => {
-          const apiNames = {
-            printful: 'Printful',
-            shopify: 'Shopify',
-            stripe: 'Stripe',
-            tiktok: 'TikTok Shop',
-            'gmail-smtp': 'Gmail SMTP',
-          };
-          return apiNames[api] || api;
-        });
-      
-      features[feature].available = features[feature].missingAPIs.length === 0;
-    });
-
-    console.log('Feature Status:', features);
     setFeatureStatus(features);
   };
 
-  const calculateStats = (ordersData, productsData) => {
+  const calculateStats = (ordersData, productsData, trendingAdded = 0) => {
     try {
       const totalRevenue = ordersData.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0);
       const totalCost = ordersData.reduce((sum, order) => sum + (parseFloat(order.cost) || 0), 0);
@@ -262,9 +233,10 @@ export default function Dashboard() {
         totalProducts: productsData.length,
         profitMargin,
         avgOrderValue,
+        trendingAdded,
       });
     } catch (error) {
-      console.error('Error calculating stats:', error);
+      console.error('[Dashboard] Error calculating stats:', error);
     }
   };
 
@@ -302,7 +274,7 @@ export default function Dashboard() {
     }
   };
 
-  const getWelcomeMessage = (totalOrders) => {
+  const getWelcomeMessage = (totalOrders, trendingAdded) => {
     const hour = new Date().getHours();
     let timeGreeting = '';
 
@@ -314,60 +286,31 @@ export default function Dashboard() {
       timeGreeting = 'Good evening';
     }
 
-    if (totalOrders === 0) {
-      return `${timeGreeting}! Start by connecting integrations and discovering trending products.`;
+    if (totalOrders === 0 && trendingAdded === 0) {
+      return `${timeGreeting}! Start by discovering trending products or connecting integrations.`;
+    } else if (trendingAdded > 0 && totalOrders === 0) {
+      return `${timeGreeting}! You've added ${trendingAdded} products. Now let's get them some sales! 🚀`;
     } else if (totalOrders < 10) {
-      return `${timeGreeting}! You're building momentum with ${totalOrders} orders. Keep it up! 🚀`;
+      return `${timeGreeting}! You're building momentum with ${totalOrders} orders from ${trendingAdded} trending products. Keep it up! 🚀`;
     } else if (totalOrders < 50) {
-      return `${timeGreeting}! Great work! ${totalOrders} orders processed. You're on the right track! 💪`;
-    } else if (totalOrders < 100) {
-      return `${timeGreeting}! Amazing! ${totalOrders} orders and counting. You're scaling! 📈`;
+      return `${timeGreeting}! Great work! ${totalOrders} orders from ${trendingAdded} products. You're on the right track! 💪`;
     } else {
-      return `${timeGreeting}! Outstanding! ${totalOrders} orders processed. Your store is thriving! 🌟`;
+      return `${timeGreeting}! Amazing! ${totalOrders} orders and counting. Your store is thriving! 🌟`;
     }
   };
 
   const getIntegrationStatus = () => {
-    const required = ['printful', 'shopify', 'stripe'];
     const connected = Object.keys(integrations).filter(key =>
       integrations[key]?.status === 'connected'
     );
     return {
-      total: Object.keys(integrations).length,
-      required: required.filter(r => connected.some(c => c.includes(r))).length,
+      total: connected.length,
+      hasShopify: connected.includes('shopify'),
+      hasPrintful: connected.includes('printful'),
     };
   };
 
-  // Feature wrapper component
-  const FeatureCard = ({ feature, href, children, locked = false, missingAPIs = [] }) => {
-    if (locked) {
-      return (
-        <div className="card opacity-60 cursor-not-allowed relative group">
-          <div className="absolute inset-0 bg-black/40 rounded-lg flex items-center justify-center z-10 group-hover:bg-black/60 transition">
-            <div className="text-center">
-              <Lock size={32} className="text-yellow-400 mx-auto mb-2" />
-              <p className="text-white text-sm font-bold">Feature Locked</p>
-              <p className="text-xs text-gray-300 mt-1">
-                {missingAPIs.length === 1 
-                  ? `Connect ${missingAPIs[0]}` 
-                  : `Connect: ${missingAPIs.join(', ')}`}
-              </p>
-            </div>
-          </div>
-          {children}
-        </div>
-      );
-    }
-
-    return (
-      <Link href={href} className="card group hover:border-accent transition">
-        {children}
-      </Link>
-    );
-  };
-
   const intStatus = getIntegrationStatus();
-  const isFullySetup = intStatus.required === 3 && Object.keys(integrations).length >= 3;
 
   const generateChartData = () => {
     const data = {};
@@ -386,7 +329,7 @@ export default function Dashboard() {
         data[day].revenue += parseFloat(order.total) || 0;
         data[day].orders += 1;
       } catch (e) {
-        console.warn('Error processing order for chart:', e);
+        console.warn('Error processing order:', e);
       }
     });
 
@@ -394,19 +337,13 @@ export default function Dashboard() {
   };
 
   const chartData = generateChartData();
-
-  const productPerformance = products.slice(0, 5).map((p, idx) => ({
-    name: (p.name || `Product ${idx + 1}`).substring(0, 12),
-    value: (idx + 1) * 20,
-  }));
-
   const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-primary flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
         <div className="text-center">
-          <div className="w-12 h-12 border-4 border-accent border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-gray-400">Loading dashboard...</p>
         </div>
       </div>
@@ -415,10 +352,10 @@ export default function Dashboard() {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-primary flex items-center justify-center">
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
         <div className="text-center">
-          <p className="text-gray-400 mb-4">You need to be logged in to view this page</p>
-          <Link href="/auth/login" className="text-accent hover:underline">
+          <p className="text-gray-400 mb-4">You need to be logged in</p>
+          <Link href="/auth/login" className="text-blue-400 hover:underline">
             Go to Login
           </Link>
         </div>
@@ -427,32 +364,32 @@ export default function Dashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-primary">
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
       {/* Header */}
-      <div className="sticky top-0 z-40 bg-secondary border-b border-gray-700">
+      <div className="sticky top-0 z-40 bg-slate-800/50 backdrop-blur border-b border-slate-700">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-white">DropBoard</h1>
+            <h1 className="text-2xl font-bold text-white">📊 DropBoard</h1>
             <p className="text-xs text-gray-400">Dropshipping Automation Platform</p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <button
               onClick={handleExport}
-              className="p-2 hover:bg-gray-700 rounded-lg transition"
+              className="p-2 hover:bg-slate-700 rounded-lg transition"
               title="Export Data"
             >
               <Download size={20} className="text-gray-400" />
             </button>
             <Link
               href="/integrations"
-              className="p-2 hover:bg-gray-700 rounded-lg transition"
+              className="p-2 hover:bg-slate-700 rounded-lg transition"
               title="Integrations"
             >
               <Zap size={20} className="text-gray-400" />
             </Link>
             <Link
               href="/settings"
-              className="p-2 hover:bg-gray-700 rounded-lg transition"
+              className="p-2 hover:bg-slate-700 rounded-lg transition"
               title="Settings"
             >
               <Settings size={20} className="text-gray-400" />
@@ -471,46 +408,43 @@ export default function Dashboard() {
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
         {/* Welcome Section */}
         <div className="space-y-2 mb-8">
-          <h2 className="text-5xl font-bold text-white">
-            Welcome back! 👋
-          </h2>
+          <h2 className="text-5xl font-bold text-white">Welcome back! 👋</h2>
           <p className="text-lg text-gray-400">
-            {getWelcomeMessage(stats.totalOrders)}
+            {getWelcomeMessage(stats.totalOrders, stats.trendingAdded)}
           </p>
           <div className="flex items-center gap-2 text-sm text-gray-500 mt-4">
             <span>📧 {user.email || 'User'}</span>
             <span className="text-gray-700">•</span>
-            <span>Account ID: {user.uid ? user.uid.substring(0, 8) : 'N/A'}...</span>
+            <span>ID: {user.uid?.substring(0, 8)}...</span>
           </div>
         </div>
 
-        {/* Setup Status Banner */}
-        {!isFullySetup && (
-          <div className="card bg-yellow-500/5 border border-yellow-500/30">
+        {/* Message Alert */}
+        {addMessage && (
+          <div className={`p-4 rounded-lg border ${addMessage.type === 'success' ? 'bg-green-900/30 border-green-500 text-green-200' : 'bg-red-900/30 border-red-500 text-red-200'}`}>
+            {addMessage.text}
+          </div>
+        )}
+
+        {/* Setup Banner */}
+        {intStatus.total === 0 && (
+          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-6">
             <div className="flex items-start justify-between">
               <div>
                 <h3 className="text-lg font-bold text-yellow-400 mb-2 flex items-center gap-2">
                   <AlertCircle size={20} />
-                  Complete Setup for Full Automation
+                  Get Started in 3 Steps
                 </h3>
                 <p className="text-sm text-gray-400 mb-4">
-                  {intStatus.required === 3
-                    ? 'Great! Core integrations connected. Add more platforms to expand.'
-                    : `Connect ${3 - intStatus.required} more integration(s) for full automation`}
+                  Connect your first integration to unlock trending products and automation
                 </p>
-                <div className="flex gap-3 flex-wrap">
-                  <Link href="/integrations" className="btn btn-primary text-sm flex items-center gap-2">
-                    <Zap size={16} />
-                    Setup Integrations
-                  </Link>
-                  <Link href="/help" className="btn btn-secondary text-sm flex items-center gap-2">
-                    <BookOpen size={16} />
-                    View Setup Guide
-                  </Link>
-                </div>
+                <Link href="/integrations" className="inline-block bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg font-medium transition flex items-center gap-2">
+                  <Zap size={16} />
+                  Connect Integrations
+                </Link>
               </div>
               <div className="text-right">
-                <p className="text-2xl font-bold text-yellow-400">{intStatus.total}/{intStatus.required + 3}</p>
+                <p className="text-2xl font-bold text-yellow-400">0/{intStatus.total + 1}</p>
                 <p className="text-xs text-gray-400">Integrations</p>
               </div>
             </div>
@@ -518,175 +452,160 @@ export default function Dashboard() {
         )}
 
         {/* Success Banner */}
-        {isFullySetup && (
-          <div className="card bg-green-500/5 border border-green-500/30">
-            <div className="flex items-center gap-3">
-              <CheckCircle size={24} className="text-green-400" />
-              <div>
-                <h3 className="font-bold text-green-400">✅ Full Automation Enabled</h3>
-                <p className="text-xs text-gray-400 mt-1">All integrations connected. Orders will auto-process!</p>
-              </div>
+        {intStatus.total > 0 && (
+          <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-4 flex items-center gap-3">
+            <CheckCircle size={24} className="text-green-400 flex-shrink-0" />
+            <div>
+              <h3 className="font-bold text-green-400">✅ Integrations Connected!</h3>
+              <p className="text-xs text-gray-400 mt-1">{intStatus.total} platform{intStatus.total !== 1 ? 's' : ''} connected</p>
             </div>
           </div>
         )}
 
-        {/* Key Metrics Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <div className="card">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-400 mb-2">Total Revenue</p>
-                <p className="text-3xl font-bold text-white">${stats.totalRevenue}</p>
-                <p className="text-xs text-green-400 mt-1">From {stats.totalOrders} orders</p>
-              </div>
-              <DollarSign size={32} className="text-green-500/20" />
-            </div>
+        {/* Key Metrics */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+          <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+            <p className="text-gray-400 text-xs">Revenue</p>
+            <p className="text-2xl font-bold text-green-400">${stats.totalRevenue}</p>
+            <p className="text-xs text-gray-500 mt-1">{stats.totalOrders} orders</p>
           </div>
 
-          <div className="card">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-400 mb-2">Net Profit</p>
-                <p className="text-3xl font-bold text-accent">${stats.totalProfit}</p>
-                <p className="text-xs text-blue-400 mt-1">{stats.profitMargin}% margin</p>
-              </div>
-              <TrendingUp size={32} className="text-accent/20" />
-            </div>
+          <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+            <p className="text-gray-400 text-xs">Profit</p>
+            <p className="text-2xl font-bold text-blue-400">${stats.totalProfit}</p>
+            <p className="text-xs text-gray-500 mt-1">{stats.profitMargin}% margin</p>
           </div>
 
-          <div className="card">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-400 mb-2">Total Cost</p>
-                <p className="text-3xl font-bold text-orange-400">${stats.totalCost}</p>
-                <p className="text-xs text-orange-300 mt-1">COGS</p>
-              </div>
-              <Zap size={32} className="text-orange-500/20" />
-            </div>
+          <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+            <p className="text-gray-400 text-xs">Cost</p>
+            <p className="text-2xl font-bold text-orange-400">${stats.totalCost}</p>
+            <p className="text-xs text-gray-500 mt-1">COGS</p>
           </div>
 
-          <div className="card">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-400 mb-2">Connected Integrations</p>
-                <p className="text-3xl font-bold text-white">{Object.keys(integrations).length}</p>
-                <p className="text-xs text-pink-400 mt-1">Platforms</p>
-              </div>
-              <Users size={32} className="text-pink-500/20" />
-            </div>
+          <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+            <p className="text-gray-400 text-xs">Products</p>
+            <p className="text-2xl font-bold text-purple-400">{stats.totalProducts}</p>
+            <p className="text-xs text-gray-500 mt-1">{stats.trendingAdded} from trending</p>
           </div>
 
-          <div className="card">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-400 mb-2">Total Orders</p>
-                <p className="text-3xl font-bold text-white">{stats.totalOrders}</p>
-                <p className="text-xs text-purple-400 mt-1">Avg ${stats.avgOrderValue}</p>
-              </div>
-              <ShoppingCart size={32} className="text-blue-500/20" />
-            </div>
+          <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+            <p className="text-gray-400 text-xs">Integrations</p>
+            <p className="text-2xl font-bold text-pink-400">{intStatus.total}</p>
+            <p className="text-xs text-gray-500 mt-1">Connected</p>
           </div>
 
-          <div className="card">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-sm text-gray-400 mb-2">Active Products</p>
-                <p className="text-3xl font-bold text-white">{stats.totalProducts}</p>
-                <p className="text-xs text-emerald-400 mt-1">In catalog</p>
-              </div>
-              <Package size={32} className="text-emerald-500/20" />
-            </div>
+          <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+            <p className="text-gray-400 text-xs">Trending</p>
+            <p className="text-2xl font-bold text-orange-400">{trendingProducts.length}</p>
+            <p className="text-xs text-gray-500 mt-1">Available</p>
           </div>
         </div>
 
-        {/* Trending Products Section - NOW WITH CLIENT-SIDE DATA */}
+        {/* Trending Products Section */}
         {featureStatus.trendingProducts?.available ? (
           <div>
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-2xl font-bold text-white flex items-center gap-2">
-                <Flame size={28} className="text-orange-400" />
-                🔥 Trending Products
-              </h3>
-              <Link href="/trending" className="text-accent hover:text-emerald-400 font-semibold transition text-sm">
-                View All ({trendingProducts.length}) →
+              <div>
+                <h3 className="text-2xl font-bold text-white flex items-center gap-2">
+                  <Flame size={28} className="text-orange-400" />
+                  🔥 Hot Trending Products
+                </h3>
+                {trendingStats.shopify > 0 && trendingStats.printful_custom > 0 && (
+                  <p className="text-xs text-gray-400 mt-1">
+                    📊 Shopify: {trendingStats.shopify} | Printful Custom: {trendingStats.printful_custom} | Bestsellers: {trendingStats.printful_bestseller}
+                  </p>
+                )}
+              </div>
+              <Link href="/trending" className="text-blue-400 hover:text-blue-300 font-semibold transition text-sm flex items-center gap-1">
+                View All ({trendingProducts.length}) <ArrowRight size={16} />
               </Link>
             </div>
-            
+
             {trendingLoading ? (
-              <div className="card bg-orange-500/5 border border-orange-500/20 text-center py-8">
+              <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-8 text-center">
                 <div className="w-8 h-8 border-4 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
                 <p className="text-gray-400">Loading trending products...</p>
               </div>
+            ) : trendingError ? (
+              <div className="bg-red-900/30 border border-red-500 rounded-lg p-4 text-red-200">
+                <p className="text-sm">❌ {trendingError}</p>
+                <p className="text-xs mt-1">Check your integrations and try again</p>
+              </div>
             ) : trendingProducts.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {trendingProducts.slice(0, 3).map((product, idx) => (
-                  <div key={product.id} className="card bg-gradient-to-br from-orange-500/10 to-red-500/10 border border-orange-500/30 group hover:border-accent transition">
+                {trendingProducts.slice(0, 3).map((product) => (
+                  <div key={product.id} className="bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-lg overflow-hidden hover:border-orange-500 transition">
                     {product.image && (
-                      <div className="mb-3 -mx-4 -mt-4 h-32 overflow-hidden rounded-t-lg">
-                        <img
-                          src={product.image}
-                          alt={product.title}
-                          className="w-full h-full object-cover"
-                          onError={(e) => {
-                            e.target.style.display = 'none';
-                          }}
-                        />
+                      <div className="h-32 overflow-hidden bg-slate-700">
+                        <img src={product.image} alt={product.title} className="w-full h-full object-cover" />
                       </div>
                     )}
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex-1">
-                        <p className="text-xs text-orange-400 font-bold">🔥 #{idx + 1}</p>
-                        <h4 className="text-base font-bold text-white line-clamp-2">{product.title}</h4>
+                    <div className="p-4">
+                      <div className="flex items-start justify-between mb-2">
+                        <h4 className="font-semibold text-white text-sm line-clamp-2 flex-1">{product.title}</h4>
+                        {product.badge && (
+                          <span className="bg-yellow-500 text-yellow-900 px-2 py-1 rounded text-xs font-bold flex-shrink-0 ml-2">
+                            {product.badge}
+                          </span>
+                        )}
                       </div>
-                      {product.views && (
-                        <span className="bg-gradient-to-r from-orange-500 to-red-500 text-white px-2 py-1 rounded text-xs font-bold flex-shrink-0">
-                          {(product.views / 1000).toFixed(0)}K
-                        </span>
+
+                      <p className={`text-xs font-medium w-fit px-2 py-1 rounded mb-2 ${product.supplier?.includes('Shopify') ? 'bg-green-900/50 text-green-300' : 'bg-blue-900/50 text-blue-300'}`}>
+                        {product.supplier}
+                      </p>
+
+                      {product.description && (
+                        <p className="text-xs text-gray-400 line-clamp-2 mb-3">{product.description}</p>
                       )}
-                    </div>
-                    {product.description && (
-                      <p className="text-xs text-gray-400 mb-3 line-clamp-2">{product.description}</p>
-                    )}
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <p className="text-xs text-gray-400">Supplier</p>
-                        <p className="text-sm font-bold text-accent">{product.supplier}</p>
+
+                      {product.reviews && (
+                        <p className="text-xs text-yellow-400 mb-2">⭐ {product.rating || 4.5} ({product.reviews} reviews)</p>
+                      )}
+
+                      <div className="flex items-center justify-between mb-3">
+                        <p className="text-lg font-bold text-green-400">${parseFloat(product.price || 0).toFixed(2)}</p>
                       </div>
-                      {product.price && (
-                        <div className="text-right">
-                          <p className="text-xs text-gray-400">Price</p>
-                          <p className="text-sm font-bold text-white">${parseFloat(product.price).toFixed(2)}</p>
-                        </div>
-                      )}
+
+                      <button
+                        onClick={() => handleAddProductToStore(product)}
+                        disabled={addingProduct === product.id}
+                        className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white py-2 rounded font-medium text-sm transition flex items-center justify-center gap-2"
+                      >
+                        {addingProduct === product.id ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            Adding...
+                          </>
+                        ) : (
+                          <>
+                            <Plus size={16} />
+                            Add to Store
+                          </>
+                        )}
+                      </button>
                     </div>
-                    <Link href="/trending" className="w-full btn btn-primary text-xs flex items-center justify-center gap-2 py-2">
-                      <Plus size={14} />
-                      View & Add
-                    </Link>
                   </div>
                 ))}
               </div>
             ) : (
-              <div className="card bg-orange-500/5 border border-orange-500/20 text-center py-8">
+              <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-8 text-center">
                 <Flame size={32} className="mx-auto text-orange-400 mb-2" />
-                <p className="text-gray-400">No trending products at the moment</p>
-                <p className="text-xs text-gray-500 mt-1">Make sure Printful and Shopify are connected</p>
+                <p className="text-gray-400">No trending products available</p>
+                <p className="text-xs text-gray-500 mt-1">Make sure Shopify or Printful integrations are connected</p>
               </div>
             )}
           </div>
         ) : (
-          <div className="card bg-yellow-500/10 border border-yellow-500/30">
-            <div className="flex items-center gap-4">
-              <Lock size={24} className="text-yellow-400 flex-shrink-0" />
-              <div>
-                <h3 className="font-bold text-yellow-400">🔒 Trending Products Locked</h3>
-                <p className="text-xs text-gray-400 mt-1">
-                  Connect {featureStatus.trendingProducts?.missingAPIs?.join(' and ')} to access trending products
-                </p>
-                <Link href="/integrations" className="text-accent text-xs font-semibold mt-2 inline-block hover:underline">
-                  Go to Integrations →
-                </Link>
-              </div>
+          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-6 flex items-start gap-4">
+            <Lock size={24} className="text-yellow-400 flex-shrink-0 mt-1" />
+            <div>
+              <h3 className="font-bold text-yellow-400">🔒 Trending Products Locked</h3>
+              <p className="text-sm text-gray-400 mt-1">
+                Connect {featureStatus.trendingProducts?.missingAPIs?.join(' or ')} to access trending products
+              </p>
+              <Link href="/integrations" className="text-blue-400 text-sm font-semibold mt-2 inline-block hover:underline">
+                Go to Integrations →
+              </Link>
             </div>
           </div>
         )}
@@ -694,98 +613,38 @@ export default function Dashboard() {
         {/* Integration Status */}
         <div>
           <h3 className="text-2xl font-bold text-white mb-6">Integration Status</h3>
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
-            <div className="card">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-semibold text-white">📦 Printful</p>
-                {integrations.printful?.status === 'connected' ? (
-                  <CheckCircle size={16} className="text-green-400" />
-                ) : (
-                  <Clock size={16} className="text-gray-400" />
-                )}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            {[
+              { key: 'printful', icon: '📦', name: 'Printful' },
+              { key: 'shopify', icon: '🛍️', name: 'Shopify' },
+              { key: 'stripe', icon: '💳', name: 'Stripe' },
+              { key: 'tiktok', icon: '🎵', name: 'TikTok' },
+              { key: 'gmail-smtp', icon: '📧', name: 'Gmail' },
+            ].map(({ key, icon, name }) => (
+              <div key={key} className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-semibold text-white">{icon} {name}</p>
+                  {integrations[key]?.status === 'connected' ? (
+                    <CheckCircle size={16} className="text-green-400" />
+                  ) : (
+                    <Clock size={16} className="text-gray-500" />
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 mb-3">
+                  {integrations[key]?.status === 'connected' ? '✅ Connected' : '⏳ Not connected'}
+                </p>
+                <Link href="/integrations" className="text-blue-400 text-xs font-semibold hover:underline">
+                  {integrations[key]?.status === 'connected' ? 'Manage →' : 'Connect →'}
+                </Link>
               </div>
-              <p className="text-xs text-gray-400 mb-4">
-                {integrations.printful?.status === 'connected' ? 'Connected' : 'Not connected'}
-              </p>
-              <Link href="/integrations" className="text-accent text-xs font-semibold hover:underline">
-                {integrations.printful?.status === 'connected' ? 'Manage →' : 'Connect →'}
-              </Link>
-            </div>
-
-            <div className="card">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-semibold text-white">🛍️ Shopify</p>
-                {integrations.shopify?.status === 'connected' ? (
-                  <CheckCircle size={16} className="text-green-400" />
-                ) : (
-                  <Clock size={16} className="text-gray-400" />
-                )}
-              </div>
-              <p className="text-xs text-gray-400 mb-4">
-                {integrations.shopify?.status === 'connected' ? 'Connected' : 'Not connected'}
-              </p>
-              <Link href="/integrations" className="text-accent text-xs font-semibold hover:underline">
-                {integrations.shopify?.status === 'connected' ? 'Manage →' : 'Connect →'}
-              </Link>
-            </div>
-
-            <div className="card">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-semibold text-white">💳 Stripe</p>
-                {integrations.stripe?.status === 'connected' ? (
-                  <CheckCircle size={16} className="text-green-400" />
-                ) : (
-                  <Clock size={16} className="text-gray-400" />
-                )}
-              </div>
-              <p className="text-xs text-gray-400 mb-4">
-                {integrations.stripe?.status === 'connected' ? 'Connected' : 'Not connected'}
-              </p>
-              <Link href="/integrations" className="text-accent text-xs font-semibold hover:underline">
-                {integrations.stripe?.status === 'connected' ? 'Manage →' : 'Connect →'}
-              </Link>
-            </div>
-
-            <div className="card">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-semibold text-white">🎵 TikTok</p>
-                {integrations.tiktok?.status === 'connected' ? (
-                  <CheckCircle size={16} className="text-green-400" />
-                ) : (
-                  <Clock size={16} className="text-gray-400" />
-                )}
-              </div>
-              <p className="text-xs text-gray-400 mb-4">
-                {integrations.tiktok?.status === 'connected' ? 'Connected' : 'Not connected'}
-              </p>
-              <Link href="/integrations" className="text-accent text-xs font-semibold hover:underline">
-                {integrations.tiktok?.status === 'connected' ? 'Manage →' : 'Connect →'}
-              </Link>
-            </div>
-
-            <div className="card">
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-semibold text-white">📧 Gmail</p>
-                {integrations['gmail-smtp']?.status === 'connected' ? (
-                  <CheckCircle size={16} className="text-green-400" />
-                ) : (
-                  <Clock size={16} className="text-gray-400" />
-                )}
-              </div>
-              <p className="text-xs text-gray-400 mb-4">
-                {integrations['gmail-smtp']?.status === 'connected' ? 'Connected' : 'Not connected'}
-              </p>
-              <Link href="/integrations" className="text-accent text-xs font-semibold hover:underline">
-                {integrations['gmail-smtp']?.status === 'connected' ? 'Manage →' : 'Connect →'}
-              </Link>
-            </div>
+            ))}
           </div>
         </div>
 
         {/* Charts */}
         {orders.length > 0 && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            <div className="lg:col-span-2 card">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <div className="lg:col-span-3 bg-slate-800 border border-slate-700 rounded-lg p-6">
               <h3 className="text-lg font-bold text-white mb-4">Revenue Overview (Weekly)</h3>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={chartData}>
@@ -800,30 +659,31 @@ export default function Dashboard() {
               </ResponsiveContainer>
             </div>
 
-            {productPerformance.length > 0 && (
-              <div className="card">
-                <h3 className="text-lg font-bold text-white mb-4">Top Products</h3>
-                <ResponsiveContainer width="100%" height={300}>
-                  <PieChart>
-                    <Pie
-                      data={productPerformance}
-                      cx="50%"
-                      cy="50%"
-                      labelLine={false}
-                      label={({ name }) => name}
-                      outerRadius={80}
-                      fill="#8884d8"
-                      dataKey="value"
-                    >
-                      {productPerformance.map((_, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip />
-                  </PieChart>
-                </ResponsiveContainer>
-              </div>
-            )}
+            <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
+              <h3 className="text-lg font-bold text-white mb-4">Product Sources</h3>
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={[
+                      { name: 'Shopify', value: trendingStats.shopify || 0 },
+                      { name: 'Printful Custom', value: trendingStats.printful_custom || 0 },
+                      { name: 'Bestsellers', value: trendingStats.printful_bestseller || 0 },
+                    ].filter(p => p.value > 0)}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={40}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {[COLORS[0], COLORS[1], COLORS[2]].map((color, index) => (
+                      <Cell key={`cell-${index}`} fill={color} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         )}
 
@@ -831,91 +691,67 @@ export default function Dashboard() {
         <div>
           <h3 className="text-2xl font-bold text-white mb-6">Quick Actions</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            <FeatureCard
-              feature="orders"
-              href="/orders"
-              locked={!featureStatus.orders?.available}
-              missingAPIs={featureStatus.orders?.missingAPIs}
-            >
-              <ShoppingCart size={24} className="text-blue-400 mb-2" />
-              <p className="font-semibold text-white">Orders</p>
-              <p className="text-xs text-gray-400">{stats.totalOrders} orders</p>
-              <div className="flex items-center gap-1 text-accent text-xs mt-3">
-                View <ArrowRight size={12} />
-              </div>
-            </FeatureCard>
-
-            <FeatureCard
-              feature="products"
-              href="/products"
-              locked={!featureStatus.products?.available}
-              missingAPIs={featureStatus.products?.missingAPIs}
-            >
+            <Link href="/products" className="bg-slate-800 border border-slate-700 hover:border-blue-500 rounded-lg p-4 transition">
               <Package size={24} className="text-purple-400 mb-2" />
               <p className="font-semibold text-white">Products</p>
-              <p className="text-xs text-gray-400">{stats.totalProducts} products</p>
-              <div className="flex items-center gap-1 text-accent text-xs mt-3">
+              <p className="text-xs text-gray-400">{stats.totalProducts} total</p>
+              <div className="flex items-center gap-1 text-blue-400 text-xs mt-3">
                 Manage <ArrowRight size={12} />
               </div>
-            </FeatureCard>
+            </Link>
 
-            <FeatureCard
-              feature="trending"
-              href="/trending"
-              locked={!featureStatus.trendingProducts?.available}
-              missingAPIs={featureStatus.trendingProducts?.missingAPIs}
-            >
+            <Link href="/trending" className="bg-slate-800 border border-slate-700 hover:border-blue-500 rounded-lg p-4 transition">
               <Flame size={24} className="text-orange-400 mb-2" />
               <p className="font-semibold text-white">Trending</p>
-              <p className="text-xs text-gray-400">Hot products</p>
-              <div className="flex items-center gap-1 text-accent text-xs mt-3">
-                Discover <ArrowRight size={12} />
+              <p className="text-xs text-gray-400">{trendingProducts.length} hot items</p>
+              <div className="flex items-center gap-1 text-blue-400 text-xs mt-3">
+                Browse <ArrowRight size={12} />
               </div>
-            </FeatureCard>
+            </Link>
 
-            <FeatureCard
-              feature="analytics"
-              href="/analytics"
-              locked={!featureStatus.analytics?.available}
-              missingAPIs={featureStatus.analytics?.missingAPIs}
-            >
-              <TrendingUp size={24} className="text-green-400 mb-2" />
-              <p className="font-semibold text-white">Analytics</p>
-              <p className="text-xs text-gray-400">Insights</p>
-              <div className="flex items-center gap-1 text-accent text-xs mt-3">
+            <Link href="/orders" className="bg-slate-800 border border-slate-700 hover:border-blue-500 rounded-lg p-4 transition">
+              <ShoppingCart size={24} className="text-blue-400 mb-2" />
+              <p className="font-semibold text-white">Orders</p>
+              <p className="text-xs text-gray-400">{stats.totalOrders} processed</p>
+              <div className="flex items-center gap-1 text-blue-400 text-xs mt-3">
                 View <ArrowRight size={12} />
               </div>
-            </FeatureCard>
+            </Link>
 
-            <Link href="/integrations" className="card group hover:border-accent transition">
+            <Link href="/integrations" className="bg-slate-800 border border-slate-700 hover:border-blue-500 rounded-lg p-4 transition">
               <Zap size={24} className="text-yellow-400 mb-2" />
               <p className="font-semibold text-white">Integrations</p>
-              <p className="text-xs text-gray-400">{Object.keys(integrations).length} connected</p>
-              <div className="flex items-center gap-1 text-accent text-xs mt-3">
+              <p className="text-xs text-gray-400">{intStatus.total} connected</p>
+              <div className="flex items-center gap-1 text-blue-400 text-xs mt-3">
                 Setup <ArrowRight size={12} />
+              </div>
+            </Link>
+
+            <Link href="/help" className="bg-slate-800 border border-slate-700 hover:border-blue-500 rounded-lg p-4 transition">
+              <BookOpen size={24} className="text-pink-400 mb-2" />
+              <p className="font-semibold text-white">Help & Docs</p>
+              <p className="text-xs text-gray-400">Learn & support</p>
+              <div className="flex items-center gap-1 text-blue-400 text-xs mt-3">
+                Read <ArrowRight size={12} />
               </div>
             </Link>
           </div>
         </div>
 
         {/* Empty State */}
-        {orders.length === 0 && products.length === 0 && (
-          <div className="card text-center py-12">
+        {stats.totalProducts === 0 && trendingProducts.length === 0 && intStatus.total === 0 && (
+          <div className="bg-slate-800 border border-slate-700 rounded-lg p-12 text-center">
             <Package size={48} className="mx-auto text-gray-600 mb-4" />
-            <h3 className="text-xl font-bold text-white mb-2">Ready to get started?</h3>
-            <p className="text-gray-400 mb-6">Connect APIs, discover trending products, and start your dropshipping business</p>
+            <h3 className="text-xl font-bold text-white mb-2">Welcome to DropBoard!</h3>
+            <p className="text-gray-400 mb-6">Let's get you set up and ready to start your dropshipping business</p>
             <div className="flex gap-4 justify-center flex-wrap">
-              <Link href="/integrations" className="btn btn-primary flex items-center gap-2">
+              <Link href="/integrations" className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition inline-flex items-center gap-2">
                 <Zap size={16} />
-                Connect Integrations
+                Connect First Integration
               </Link>
-              <Link href="/trending" className="btn btn-secondary flex items-center gap-2">
-                <Flame size={16} />
-                View Trending
-              </Link>
-              <Link href="/help" className="btn btn-secondary flex items-center gap-2">
+              <Link href="/help" className="bg-slate-700 hover:bg-slate-600 text-white px-6 py-2 rounded-lg font-medium transition inline-flex items-center gap-2">
                 <BookOpen size={16} />
-                Learn More
+                View Setup Guide
               </Link>
             </div>
           </div>
