@@ -4,150 +4,127 @@ import { NextResponse } from 'next/server';
 
 export async function GET(request) {
   try {
-    console.log('\n========== [API] Starting trending request ==========');
+    console.log('\n\n========== [API] 🚀 STARTING TRENDING REQUEST ==========\n');
     
     const userId = request.headers.get('x-user-id');
     const integrationsParam = request.headers.get('x-integrations');
     
     console.log('[API] User ID:', userId);
-    console.log('[API] Has integrations:', !!integrationsParam);
+    console.log('[API] Integrations param length:', integrationsParam?.length);
 
     if (!userId) {
-      console.log('[API] ❌ No user ID provided');
-      return NextResponse.json({
-        success: false,
-        error: 'Not authenticated',
-        products: [],
-        debug: 'No user ID'
-      }, { status: 401 });
+      console.log('[API] ❌ NO USER ID!');
+      return NextResponse.json({ success: false, error: 'No user ID', products: [] }, { status: 401 });
     }
 
     if (!integrationsParam) {
-      console.log('[API] ❌ No integrations provided');
-      return NextResponse.json({
-        success: false,
-        error: 'No integrations data',
-        products: [],
-        debug: 'No integrations header'
-      }, { status: 400 });
+      console.log('[API] ❌ NO INTEGRATIONS PARAM!');
+      return NextResponse.json({ success: false, error: 'No integrations', products: [] }, { status: 400 });
     }
 
     let integrations = {};
     try {
       integrations = JSON.parse(integrationsParam);
-      console.log('[API] ✅ Parsed integrations keys:', Object.keys(integrations));
+      console.log('[API] ✅ Parsed integrations:', Object.keys(integrations));
+      console.log('[API] Integration details:');
+      Object.entries(integrations).forEach(([key, value]) => {
+        console.log(`  - ${key}: status=${value?.status}, has_creds=${!!value?.credentials}`);
+      });
     } catch (e) {
-      console.log('[API] ❌ Failed to parse integrations:', e.message);
-      return NextResponse.json({
-        success: false,
-        error: 'Invalid integrations data',
-        products: [],
-        debug: 'Parse error: ' + e.message
-      }, { status: 400 });
+      console.log('[API] ❌ PARSE ERROR:', e.message);
+      return NextResponse.json({ success: false, error: 'Parse error', products: [] }, { status: 400 });
     }
 
     let allProducts = [];
 
     // ============================================================================
-    // SHOPIFY - SIMPLE REST API ONLY
+    // SHOPIFY
     // ============================================================================
-    console.log('[API] ========== SHOPIFY ==========');
+    console.log('\n[API] ========== SHOPIFY ==========');
     
     if (integrations.shopify?.status === 'connected') {
-      console.log('[API] ✅ Shopify is connected');
+      console.log('[API] ✅ Shopify connected');
       
       const storeUrl = integrations.shopify?.credentials?.storeUrl;
       const token = integrations.shopify?.credentials?.accessToken;
 
       console.log('[API] Store URL:', storeUrl);
-      console.log('[API] Token exists:', !!token);
-      console.log('[API] Token length:', token?.length);
+      console.log('[API] Token:', token ? `${token.substring(0, 20)}...` : 'MISSING');
 
       if (!storeUrl || !token) {
-        console.log('[API] ❌ Missing Shopify credentials');
-        return NextResponse.json({
-          success: false,
-          error: 'Missing Shopify credentials',
-          products: [],
-          debug: `storeUrl: ${storeUrl}, token: ${!!token}`
-        });
-      }
-
-      try {
-        // Clean up store URL
-        const cleanUrl = storeUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
-        console.log('[API] Clean URL:', cleanUrl);
-
-        const apiUrl = `https://${cleanUrl}/admin/api/2025-01/products.json?limit=20&status=active`;
-        console.log('[API] API URL:', apiUrl);
-
-        const response = await fetch(apiUrl, {
-          method: 'GET',
-          headers: {
-            'X-Shopify-Access-Token': token,
-            'Content-Type': 'application/json',
-          },
-        });
-
-        console.log('[API] Response status:', response.status);
-
-        if (response.ok) {
-          const data = await response.json();
-          const products = data.products || [];
+        console.log('[API] ❌ MISSING CREDENTIALS');
+      } else {
+        try {
+          const cleanUrl = storeUrl.replace(/^https?:\/\//, '').replace(/\/$/, '');
+          const apiUrl = `https://${cleanUrl}/admin/api/2025-01/products.json?limit=20&status=active`;
           
-          console.log('[API] Total products from Shopify:', products.length);
+          console.log('[API] 📡 Fetching from:', apiUrl);
 
-          const mappedProducts = products.map(p => {
-            const firstVariant = p.variants?.[0];
-            const firstImage = p.images?.[0];
+          const response = await fetch(apiUrl, {
+            method: 'GET',
+            headers: {
+              'X-Shopify-Access-Token': token,
+              'Content-Type': 'application/json',
+            },
+          });
 
-            return {
+          console.log('[API] Response status:', response.status);
+          console.log('[API] Response headers:', {
+            'content-type': response.headers.get('content-type'),
+            'x-request-id': response.headers.get('x-request-id'),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            const products = data.products || [];
+            console.log('[API] ✅ Shopify returned:', products.length, 'products');
+
+            if (products.length > 0) {
+              products.slice(0, 2).forEach(p => {
+                console.log(`  - ${p.title} (${p.variants?.length} variants)`);
+              });
+            }
+
+            const mappedProducts = products.map(p => ({
               id: `shopify_${p.id}`,
               title: p.title,
               supplier: 'Shopify',
-              image: firstImage?.src,
-              handle: p.handle,
-              price: firstVariant?.price,
-              currency: 'USD',
-              description: p.description?.substring(0, 150) || null,
-              availability_status: 'in_stock',
-              product_type: p.product_type,
-              brand: p.vendor,
-              variants: p.variants?.length || 0,
-              store_url: `https://${cleanUrl}/products/${p.handle}`,
+              image: p.images?.[0]?.src,
+              price: p.variants?.[0]?.price,
               source: 'shopify'
-            };
-          });
+            }));
 
-          allProducts = allProducts.concat(mappedProducts);
-          console.log('[API] ✅ Added', mappedProducts.length, 'Shopify products');
-        } else {
-          const errorText = await response.text();
-          console.log('[API] ❌ Shopify error status:', response.status);
-          console.log('[API] ❌ Error body:', errorText.substring(0, 200));
+            allProducts = allProducts.concat(mappedProducts);
+            console.log('[API] ✅ Added', mappedProducts.length, 'Shopify products to allProducts');
+          } else {
+            const errorText = await response.text();
+            console.log('[API] ❌ Shopify error:', response.status);
+            console.log('[API] Error response:', errorText.substring(0, 300));
+          }
+        } catch (err) {
+          console.error('[API] ❌ Shopify exception:', err.message);
+          console.error('[API] Stack:', err.stack?.split('\n')[0]);
         }
-      } catch (err) {
-        console.error('[API] ❌ Shopify exception:', err.message);
       }
     } else {
-      console.log('[API] ⚠️ Shopify not connected');
+      console.log('[API] ⚠️ Shopify NOT connected');
     }
 
     // ============================================================================
-    // PRINTFUL - FETCH YOUR PRODUCTS + BESTSELLERS
+    // PRINTFUL
     // ============================================================================
-    console.log('[API] ========== PRINTFUL ==========');
+    console.log('\n[API] ========== PRINTFUL ==========');
     
     if (integrations.printful?.status === 'connected') {
-      console.log('[API] ✅ Printful is connected');
+      console.log('[API] ✅ Printful connected');
       
       const token = integrations.printful?.credentials?.apiToken;
-      console.log('[API] Printful token exists:', !!token);
+      console.log('[API] Token:', token ? `${token.substring(0, 20)}...` : 'MISSING');
       console.log('[API] Token length:', token?.length);
 
       if (token) {
-        // STEP 1: Try to fetch YOUR custom products from Printful
-        console.log('[API] 📋 Fetching YOUR custom Printful products...');
+        // Try custom products
+        console.log('[API] 📋 Fetching custom products...');
         
         try {
           const customResponse = await fetch(
@@ -161,20 +138,17 @@ export async function GET(request) {
             }
           );
 
-          console.log('[API] Custom products response status:', customResponse.status);
+          console.log('[API] Custom products response:', customResponse.status);
 
           if (customResponse.ok) {
             const customData = await customResponse.json();
             const customProducts = customData.result || [];
-            
-            console.log('[API] Custom products found:', customProducts.length);
+            console.log('[API] ✅ Found', customProducts.length, 'custom products');
 
-            // Process your custom products
-            for (const customProduct of customProducts.slice(0, 20)) {
+            for (const cp of customProducts.slice(0, 5)) {
               try {
-                // Get detailed info for each product
                 const detailResponse = await fetch(
-                  `https://api.v2.printful.com/store/products/${customProduct.id}`,
+                  `https://api.v2.printful.com/store/products/${cp.id}`,
                   {
                     method: 'GET',
                     headers: {
@@ -187,52 +161,38 @@ export async function GET(request) {
                 if (detailResponse.ok) {
                   const detailData = await detailResponse.json();
                   const syncProduct = detailData.result?.sync_product;
-                  const syncVariants = detailData.result?.sync_variants || [];
-                  const firstVariant = syncVariants[0];
-
-                  if (syncProduct && firstVariant) {
+                  
+                  if (syncProduct) {
+                    console.log('[API] ✅ Adding custom:', syncProduct.name);
                     allProducts.push({
                       id: `printful_custom_${syncProduct.id}`,
                       title: syncProduct.name,
                       supplier: 'Printful (Your Product)',
-                      image: syncProduct.thumbnail_url,
-                      price: firstVariant.retail_price,
-                      currency: 'USD',
-                      description: syncProduct.description?.substring(0, 150),
-                      availability_status: 'in_stock',
-                      variant_count: syncVariants.length,
                       source: 'printful_custom'
                     });
-
-                    console.log('[API] ✅ Added Printful product:', syncProduct.name);
                   }
                 }
               } catch (err) {
-                console.warn('[API] ⚠️ Error fetching custom product details:', err.message);
+                console.warn('[API] ⚠️ Custom product detail error:', err.message);
               }
             }
           } else {
-            console.warn('[API] ⚠️ Could not fetch custom products:', customResponse.status);
+            console.warn('[API] ⚠️ Custom products fetch failed:', customResponse.status);
           }
         } catch (err) {
-          console.warn('[API] ⚠️ Error fetching custom products:', err.message);
+          console.warn('[API] ⚠️ Custom products error:', err.message);
         }
 
-        // STEP 2: Add Printful bestsellers (if you have few custom products)
-        console.log('[API] 🏆 Adding Printful bestsellers...');
+        // Try bestsellers
+        console.log('[API] 🏆 Fetching bestsellers...');
         
-        const bestsellers = [
-          { id: 71, name: 'Bella + Canvas T-Shirt', type: 'T-Shirt' },
-          { id: 172, name: 'Framed Poster', type: 'Poster' },
-          { id: 23, name: 'Hoodie', type: 'Hoodie' },
-          { id: 49, name: 'Dad Hat', type: 'Hat' },
-          { id: 85, name: 'Mug', type: 'Mug' },
-        ];
+        const bestsellers = [71, 172, 23, 49, 85];
+        let addedBestsellers = 0;
 
-        for (const item of bestsellers) {
+        for (const id of bestsellers) {
           try {
             const response = await fetch(
-              `https://api.v2.printful.com/products/${item.id}`,
+              `https://api.v2.printful.com/products/${id}`,
               {
                 method: 'GET',
                 headers: {
@@ -242,55 +202,51 @@ export async function GET(request) {
               }
             );
 
+            console.log(`[API] Bestseller ${id}: status ${response.status}`);
+
             if (response.ok) {
               const data = await response.json();
-              const details = data.result;
-              const productInfo = details.product;
-              const firstVariant = details.variants?.[0];
-
-              if (productInfo && firstVariant) {
+              const productInfo = data.result?.product;
+              
+              if (productInfo) {
+                console.log('[API] ✅ Added bestseller:', productInfo.title);
                 allProducts.push({
                   id: `printful_bestseller_${productInfo.id}`,
                   title: productInfo.title,
                   supplier: 'Printful Bestseller',
-                  image: productInfo.image,
-                  price: parseFloat(firstVariant.price).toFixed(2),
-                  currency: productInfo.currency,
-                  description: productInfo.description?.substring(0, 150),
-                  availability_status: 'in_stock',
-                  badge: '🏆 Bestseller',
                   source: 'printful_bestseller'
                 });
-
-                console.log('[API] ✅ Added bestseller:', productInfo.title);
+                addedBestsellers++;
               }
+            } else {
+              const errorText = await response.text();
+              console.log(`[API] ❌ Bestseller ${id} error:`, errorText.substring(0, 100));
             }
           } catch (err) {
-            console.warn('[API] ⚠️ Bestseller error for', item.id, ':', err.message);
+            console.warn('[API] ⚠️ Bestseller', id, 'error:', err.message);
           }
         }
+
+        console.log('[API] Added', addedBestsellers, 'bestsellers');
+      } else {
+        console.log('[API] ❌ No Printful token!');
       }
     } else {
-      console.log('[API] ⚠️ Printful not connected');
+      console.log('[API] ⚠️ Printful NOT connected');
     }
 
-    console.log('[API] ========== FINAL RESULT ==========');
+    console.log('\n[API] ========== FINAL RESULT ==========');
     console.log('[API] Total products:', allProducts.length);
-    console.log('[API] Breakdown:', {
-      shopify: allProducts.filter(p => p.source === 'shopify').length,
-      printful_custom: allProducts.filter(p => p.source === 'printful_custom').length,
-      printful_bestseller: allProducts.filter(p => p.source === 'printful_bestseller').length
-    });
+    console.log('[API] Breakdown:');
+    console.log('  - Shopify:', allProducts.filter(p => p.source === 'shopify').length);
+    console.log('  - Printful Custom:', allProducts.filter(p => p.source === 'printful_custom').length);
+    console.log('  - Printful Bestsellers:', allProducts.filter(p => p.source === 'printful_bestseller').length);
+    console.log('[API] 🎉 Sending response...\n');
 
     return NextResponse.json({
       success: true,
       products: allProducts,
       message: `Loaded ${allProducts.length} products`,
-      debug: {
-        shopifyConnected: !!integrations.shopify?.status,
-        printfulConnected: !!integrations.printful?.status,
-        totalLoaded: allProducts.length,
-      }
     });
 
   } catch (error) {
@@ -302,10 +258,6 @@ export async function GET(request) {
         success: false,
         error: error.message,
         products: [],
-        debug: {
-          error: error.message,
-          stack: error.stack?.split('\n').slice(0, 3)
-        }
       },
       { status: 500 }
     );
