@@ -1,7 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  images: {
+    unoptimized: true,
+  },
   experimental: {
-    cacheMaxMemorySize: 52 * 1024 * 1024, // 52MB (default is 50MB)
+    optimizeCss: false,
   },
 };
 
