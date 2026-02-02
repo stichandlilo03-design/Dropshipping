@@ -1,12 +1,9 @@
+// app/api/auth/customer/login/route.js
 import { NextResponse } from 'next/server';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '@/lib/firebase';
-import { sign } from 'jose';
-
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.JWT_SECRET || 'your-secret-key'
-);
+import jwt from 'jsonwebtoken';
 
 export async function POST(request) {
   try {
@@ -24,7 +21,7 @@ export async function POST(request) {
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
 
-    // Get customer details
+    // Get customer details from Firestore
     const customerDoc = await getDoc(doc(db, 'customers', user.uid));
     
     if (!customerDoc.exists()) {
@@ -36,15 +33,15 @@ export async function POST(request) {
 
     const customerData = customerDoc.data();
 
-    // Generate JWT token
-    const token = await sign(
+    // Generate JWT token using jsonwebtoken
+    const token = jwt.sign(
       {
         id: user.uid,
         email: user.email,
         type: 'customer'
       },
-      JWT_SECRET,
-      { algorithm: 'HS256' }
+      process.env.JWT_SECRET || 'your-secret-key-min-32-chars-long',
+      { expiresIn: '7d' }
     );
 
     console.log('✅ Customer logged in:', user.uid);
@@ -57,7 +54,9 @@ export async function POST(request) {
         email: user.email,
         firstName: customerData.firstName,
         lastName: customerData.lastName,
-        phone: customerData.phone
+        phone: customerData.phone,
+        clv: customerData.clv || 0,
+        order_count: customerData.order_count || 0
       }
     }, { status: 200 });
 
@@ -71,8 +70,15 @@ export async function POST(request) {
       );
     }
 
+    if (error.code === 'auth/user-disabled') {
+      return NextResponse.json(
+        { success: false, error: 'This account has been disabled' },
+        { status: 403 }
+      );
+    }
+
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: error.message || 'Login failed' },
       { status: 500 }
     );
   }
