@@ -29,7 +29,7 @@
     "zod": "^3.22.0",
     "papaparse": "^5.4.0",
     "react-hook-form": "^7.48.0",
-    "easypost": "^7.10.0",
+    "shippo": "^1.10.0",
     "socket.io-client": "^4.6.0",
     "pdfkit": "^0.13.0",
     "multer": "^1.4.5",
