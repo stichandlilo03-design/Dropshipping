@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, LogOut, ShoppingCart, Package, Clock, CheckCircle, XCircle, Eye } from 'lucide-react';
+import { ArrowLeft, LogOut, ShoppingCart, Package, Clock, CheckCircle, XCircle, Eye, Zap } from 'lucide-react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
@@ -17,7 +17,6 @@ function CustomerAccountContent() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [debugInfo, setDebugInfo] = useState('');
 
   useEffect(() => {
     loadCustomerData();
@@ -40,56 +39,45 @@ function CustomerAccountContent() {
       console.log('[CustomerAccount] Customer loaded:', parsedCustomer.id, parsedCustomer.email);
       setCustomer(parsedCustomer);
 
-      // Load all orders and filter client-side
+      // Load all orders and filter by customer
       await loadAllOrders(parsedCustomer.id, parsedCustomer.email);
       setLoading(false);
     } catch (error) {
       console.error('[CustomerAccount] Error:', error);
-      setDebugInfo(`Error: ${error.message}`);
       setLoading(false);
     }
   };
 
   const loadAllOrders = async (customerId, customerEmail) => {
     try {
-      console.log('[CustomerAccount] Loading ALL orders from Firestore...');
+      console.log('[CustomerAccount] Loading all orders from Firestore...');
 
       const ordersRef = collection(db, 'orders');
       const querySnapshot = await getDocs(ordersRef);
 
       const loadedOrders = [];
-      const debugMessages = [];
-
-      console.log('[CustomerAccount] Total orders in database:', querySnapshot.size);
 
       querySnapshot.forEach((doc) => {
         const orderData = doc.data();
-
-        // Log first few for debugging
-        if (loadedOrders.length < 3) {
-          console.log(`[Order ${loadedOrders.length}] Fields:`, Object.keys(orderData));
-          console.log(`[Order ${loadedOrders.length}] customerId:`, orderData.customerId);
-          console.log(`[Order ${loadedOrders.length}] customerEmail:`, orderData.customerEmail);
-          console.log(`[Order ${loadedOrders.length}] status:`, orderData.status);
-          debugMessages.push(`Order: customerId=${orderData.customerId}, email=${orderData.customerEmail}, status=${orderData.status}`);
-        }
-
-        // UNIVERSAL MATCHING - Check ALL possible field names
-        const isMatch = 
-          // Direct customerId match
+        
+        // UNIVERSAL MATCHING
+        const matchesCustomer = 
           (orderData.customerId && String(orderData.customerId).trim() === String(customerId).trim()) ||
-          // Alternative field names
           (orderData.customer_id && String(orderData.customer_id).trim() === String(customerId).trim()) ||
           (orderData.userId && String(orderData.userId).trim() === String(customerId).trim()) ||
           (orderData.user_id && String(orderData.user_id).trim() === String(customerId).trim()) ||
           (orderData.uid && String(orderData.uid).trim() === String(customerId).trim()) ||
-          // Email match (fallback)
           (orderData.customerEmail && String(orderData.customerEmail).trim() === String(customerEmail).trim()) ||
           (orderData.customer_email && String(orderData.customer_email).trim() === String(customerEmail).trim()) ||
           (orderData.email && String(orderData.email).trim() === String(customerEmail).trim());
 
-        if (isMatch) {
-          console.log('[CustomerAccount] ✅ Order matched:', doc.id, 'Status:', orderData.status);
+        if (matchesCustomer) {
+          console.log('[CustomerAccount] ✅ Found order:', {
+            id: doc.id,
+            status: orderData.status,
+            items: orderData.items?.length || 0,
+          });
+
           loadedOrders.push({
             id: doc.id,
             ...orderData,
@@ -97,7 +85,7 @@ function CustomerAccountContent() {
         }
       });
 
-      console.log('[CustomerAccount] Total matching orders:', loadedOrders.length);
+      console.log('[CustomerAccount] Total orders loaded:', loadedOrders.length);
 
       // Sort by date (newest first)
       loadedOrders.sort((a, b) => {
@@ -107,11 +95,9 @@ function CustomerAccountContent() {
       });
 
       setOrders(loadedOrders);
-      setDebugInfo(`Found ${loadedOrders.length} orders\n${debugMessages.join('\n')}`);
       applyFilters(loadedOrders, 'all', '');
     } catch (error) {
       console.error('[CustomerAccount] Error loading orders:', error);
-      setDebugInfo(`Error loading orders: ${error.message}`);
       setOrders([]);
     }
   };
@@ -210,6 +196,29 @@ function CustomerAccountContent() {
     router.push('/');
   };
 
+  const handleContinuePayment = (order) => {
+    // Store pending order info
+    localStorage.setItem('pendingCheckout', JSON.stringify({
+      orderId: order.id,
+      email: order.customerEmail,
+      fullName: order.customerName,
+      phone: order.customerPhone,
+      address: order.shippingAddress?.address || '',
+      city: order.shippingAddress?.city || '',
+      state: order.shippingAddress?.state || '',
+      zipCode: order.shippingAddress?.zipCode || '',
+      country: order.shippingAddress?.country || 'United States',
+      cartData: order.items,
+      subtotal: order.subtotal,
+      tax: order.tax,
+      total: order.total,
+      timestamp: new Date().toISOString()
+    }));
+
+    // Redirect to checkout with order context
+    window.location.href = `/checkout?orderId=${order.id}`;
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
@@ -235,6 +244,10 @@ function CustomerAccountContent() {
     );
   }
 
+  const paidCount = orders.filter((o) => String(o.status || '').toLowerCase() === 'paid').length;
+  const pendingCount = orders.filter((o) => String(o.status || '').toLowerCase() === 'pending_payment').length;
+  const cancelledCount = orders.filter((o) => String(o.status || '').toLowerCase() === 'cancelled_payment').length;
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
       {/* Header */}
@@ -256,13 +269,6 @@ function CustomerAccountContent() {
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
-        {/* Debug Info */}
-        {debugInfo && (
-          <div className="bg-blue-900/30 border border-blue-500/50 rounded-lg p-3">
-            <p className="text-blue-400 text-xs whitespace-pre-wrap font-mono">{debugInfo}</p>
-          </div>
-        )}
-
         {/* Profile Section */}
         <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
           <h2 className="text-xl font-bold text-white mb-4">Profile Information</h2>
@@ -294,21 +300,15 @@ function CustomerAccountContent() {
           </div>
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
             <p className="text-gray-400 text-sm">Paid</p>
-            <p className="text-3xl font-bold text-green-400 mt-2">
-              {orders.filter((o) => String(o.status || '').toLowerCase() === 'paid').length}
-            </p>
+            <p className="text-3xl font-bold text-green-400 mt-2">{paidCount}</p>
           </div>
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
             <p className="text-gray-400 text-sm">Pending</p>
-            <p className="text-3xl font-bold text-yellow-400 mt-2">
-              {orders.filter((o) => String(o.status || '').toLowerCase() === 'pending_payment').length}
-            </p>
+            <p className="text-3xl font-bold text-yellow-400 mt-2">{pendingCount}</p>
           </div>
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
             <p className="text-gray-400 text-sm">Cancelled</p>
-            <p className="text-3xl font-bold text-red-400 mt-2">
-              {orders.filter((o) => String(o.status || '').toLowerCase() === 'cancelled_payment').length}
-            </p>
+            <p className="text-3xl font-bold text-red-400 mt-2">{cancelledCount}</p>
           </div>
         </div>
 
@@ -367,7 +367,7 @@ function CustomerAccountContent() {
                           {getStatusBadge(order.status)}
                         </td>
                         <td className="px-6 py-4 text-sm text-gray-300">
-                          {new Date(order.createdAt).toLocaleDateString()}
+                          {order.createdAt ? new Date(order.createdAt).toLocaleDateString() : 'N/A'}
                         </td>
                         <td className="px-6 py-4 text-right">
                           <button
@@ -375,9 +375,9 @@ function CustomerAccountContent() {
                               setSelectedOrder(order);
                               setShowModal(true);
                             }}
-                            className="p-2 hover:bg-slate-600 rounded transition"
+                            className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition"
                           >
-                            <Eye size={16} className="text-gray-400" />
+                            View
                           </button>
                         </td>
                       </tr>
@@ -396,10 +396,10 @@ function CustomerAccountContent() {
         </div>
       </div>
 
-      {/* Order Modal */}
+      {/* Order Details Modal */}
       {showModal && selectedOrder && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-slate-800 rounded-lg max-w-2xl w-full border border-slate-700 p-8 max-h-96 overflow-y-auto">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-slate-800 rounded-lg max-w-3xl w-full border border-slate-700 p-8 my-8">
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold text-white">Order Details</h2>
               <button
@@ -410,61 +410,125 @@ function CustomerAccountContent() {
               </button>
             </div>
 
-            <div className="space-y-4">
-              <div>
-                <p className="text-gray-400 text-sm">Order ID</p>
-                <p className="text-white font-mono text-sm">{selectedOrder.id}</p>
-              </div>
-
-              <div>
-                <p className="text-gray-400 text-sm">Items</p>
-                <div className="space-y-2 mt-2">
-                  {selectedOrder.items?.map((item, idx) => (
-                    <p key={idx} className="text-gray-300 text-sm">
-                      {item.productName} × {item.quantity} @ ${item.price.toFixed(2)}
-                    </p>
-                  ))}
+            <div className="space-y-6">
+              {/* Order Header */}
+              <div className="grid grid-cols-2 gap-4 pb-4 border-b border-slate-700">
+                <div>
+                  <p className="text-gray-400 text-sm">Order ID</p>
+                  <p className="text-white font-mono text-sm">{selectedOrder.id}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 text-sm">Date</p>
+                  <p className="text-white font-semibold">
+                    {selectedOrder.createdAt ? new Date(selectedOrder.createdAt).toLocaleString() : 'N/A'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-gray-400 text-sm">Status</p>
+                  {getStatusBadge(selectedOrder.status)}
+                </div>
+                <div>
+                  <p className="text-gray-400 text-sm">Total</p>
+                  <p className="text-green-400 font-bold text-lg">${parseFloat(selectedOrder.total || 0).toFixed(2)}</p>
                 </div>
               </div>
 
-              <div className="border-t border-slate-700 pt-4">
-                <div className="grid grid-cols-3 gap-4">
-                  <div>
-                    <p className="text-gray-400 text-xs">Subtotal</p>
-                    <p className="text-blue-400 text-lg font-bold">${parseFloat(selectedOrder.subtotal || 0).toFixed(2)}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-400 text-xs">Tax</p>
-                    <p className="text-yellow-400 text-lg font-bold">${parseFloat(selectedOrder.tax || 0).toFixed(2)}</p>
-                  </div>
-                  <div>
-                    <p className="text-gray-400 text-xs">Total</p>
-                    <p className="text-green-400 text-lg font-bold">${parseFloat(selectedOrder.total || 0).toFixed(2)}</p>
-                  </div>
+              {/* Items */}
+              <div>
+                <h3 className="text-lg font-bold text-white mb-4">Items in This Order</h3>
+                <div className="space-y-3 bg-slate-700/30 rounded-lg p-4">
+                  {selectedOrder.items && selectedOrder.items.length > 0 ? (
+                    selectedOrder.items.map((item, idx) => (
+                      <div key={idx} className="flex items-start justify-between border-b border-slate-600 pb-3 last:border-0">
+                        <div className="flex-1">
+                          <div className="flex gap-3">
+                            {item.image && (
+                              <img
+                                src={item.image}
+                                alt={item.productName}
+                                className="w-16 h-16 object-cover rounded border border-slate-600"
+                              />
+                            )}
+                            <div>
+                              <p className="text-white font-semibold">{item.productName}</p>
+                              <p className="text-gray-400 text-sm">Qty: {item.quantity}</p>
+                              <p className="text-gray-400 text-sm">Price: ${parseFloat(item.price || 0).toFixed(2)}</p>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-green-400 font-bold">
+                            ${(parseFloat(item.price || 0) * item.quantity).toFixed(2)}
+                          </p>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-gray-400">No items in this order</p>
+                  )}
                 </div>
               </div>
 
-              <div className="border-t border-slate-700 pt-4">
-                <p className="text-gray-400 text-sm mb-2">Status</p>
-                {getStatusBadge(selectedOrder.status)}
-                {selectedOrder.reason && (
-                  <p className="text-gray-400 text-xs mt-2">Reason: {selectedOrder.reason}</p>
+              {/* Price Breakdown */}
+              <div className="bg-slate-700/30 rounded-lg p-4 space-y-2">
+                <div className="flex justify-between text-gray-300">
+                  <span>Subtotal</span>
+                  <span className="font-semibold">${parseFloat(selectedOrder.subtotal || 0).toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-gray-300">
+                  <span>Shipping</span>
+                  <span className="font-semibold">$10.00</span>
+                </div>
+                <div className="flex justify-between text-gray-300">
+                  <span>Tax</span>
+                  <span className="font-semibold">${parseFloat(selectedOrder.tax || 0).toFixed(2)}</span>
+                </div>
+                <div className="border-t border-slate-600 pt-2 flex justify-between text-white font-bold">
+                  <span>Total</span>
+                  <span className="text-green-400">${parseFloat(selectedOrder.total || 0).toFixed(2)}</span>
+                </div>
+              </div>
+
+              {/* Shipping Address */}
+              {selectedOrder.shippingAddress && (
+                <div>
+                  <h3 className="text-lg font-bold text-white mb-2">Shipping Address</h3>
+                  <div className="bg-slate-700/30 rounded-lg p-4 text-gray-300 text-sm space-y-1">
+                    <p>{selectedOrder.shippingAddress.address}</p>
+                    <p>{selectedOrder.shippingAddress.city}, {selectedOrder.shippingAddress.state} {selectedOrder.shippingAddress.zipCode}</p>
+                    <p>{selectedOrder.shippingAddress.country}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* Reason for Cancelled */}
+              {selectedOrder.status === 'cancelled_payment' && selectedOrder.reason && (
+                <div className="bg-red-900/20 border border-red-500/30 rounded-lg p-4">
+                  <p className="text-red-200 text-sm"><strong>Reason:</strong> {selectedOrder.reason}</p>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-4 border-t border-slate-700">
+                {selectedOrder.status === 'pending_payment' && (
+                  <button
+                    onClick={() => {
+                      setShowModal(false);
+                      handleContinuePayment(selectedOrder);
+                    }}
+                    className="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition"
+                  >
+                    <Zap size={18} />
+                    Continue Payment
+                  </button>
                 )}
+                <button
+                  onClick={() => setShowModal(false)}
+                  className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-bold transition"
+                >
+                  Close
+                </button>
               </div>
-
-              <div className="border-t border-slate-700 pt-4">
-                <p className="text-gray-400 text-sm">Date</p>
-                <p className="text-white font-semibold">
-                  {new Date(selectedOrder.createdAt).toLocaleString()}
-                </p>
-              </div>
-
-              <button
-                onClick={() => setShowModal(false)}
-                className="w-full bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg font-semibold transition mt-4"
-              >
-                Close
-              </button>
             </div>
           </div>
         </div>
