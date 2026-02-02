@@ -3,8 +3,8 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, LogOut, Settings, ShoppingCart, Package, Clock, CheckCircle, XCircle, Eye } from 'lucide-react';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { ArrowLeft, LogOut, ShoppingCart, Package, Clock, CheckCircle, XCircle, Eye } from 'lucide-react';
+import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 function CustomerAccountContent() {
@@ -17,6 +17,7 @@ function CustomerAccountContent() {
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [debugInfo, setDebugInfo] = useState('');
 
   useEffect(() => {
     loadCustomerData();
@@ -36,36 +37,67 @@ function CustomerAccountContent() {
       }
 
       const parsedCustomer = JSON.parse(customerData);
-      console.log('[CustomerAccount] Customer loaded:', parsedCustomer.id);
+      console.log('[CustomerAccount] Customer loaded:', parsedCustomer.id, parsedCustomer.email);
       setCustomer(parsedCustomer);
 
-      // Load orders using Firestore query
-      await loadCustomerOrders(parsedCustomer.id);
+      // Load all orders and filter client-side
+      await loadAllOrders(parsedCustomer.id, parsedCustomer.email);
       setLoading(false);
     } catch (error) {
       console.error('[CustomerAccount] Error:', error);
+      setDebugInfo(`Error: ${error.message}`);
       setLoading(false);
     }
   };
 
-  const loadCustomerOrders = async (customerId) => {
+  const loadAllOrders = async (customerId, customerEmail) => {
     try {
-      console.log('[CustomerAccount] Loading orders for customerId:', customerId);
+      console.log('[CustomerAccount] Loading ALL orders from Firestore...');
 
-      // Query orders by customerId
       const ordersRef = collection(db, 'orders');
-      const q = query(ordersRef, where('customerId', '==', customerId));
-      const querySnapshot = await getDocs(q);
+      const querySnapshot = await getDocs(ordersRef);
 
       const loadedOrders = [];
+      const debugMessages = [];
+
+      console.log('[CustomerAccount] Total orders in database:', querySnapshot.size);
+
       querySnapshot.forEach((doc) => {
-        loadedOrders.push({
-          id: doc.id,
-          ...doc.data(),
-        });
+        const orderData = doc.data();
+
+        // Log first few for debugging
+        if (loadedOrders.length < 3) {
+          console.log(`[Order ${loadedOrders.length}] Fields:`, Object.keys(orderData));
+          console.log(`[Order ${loadedOrders.length}] customerId:`, orderData.customerId);
+          console.log(`[Order ${loadedOrders.length}] customerEmail:`, orderData.customerEmail);
+          console.log(`[Order ${loadedOrders.length}] status:`, orderData.status);
+          debugMessages.push(`Order: customerId=${orderData.customerId}, email=${orderData.customerEmail}, status=${orderData.status}`);
+        }
+
+        // UNIVERSAL MATCHING - Check ALL possible field names
+        const isMatch = 
+          // Direct customerId match
+          (orderData.customerId && String(orderData.customerId).trim() === String(customerId).trim()) ||
+          // Alternative field names
+          (orderData.customer_id && String(orderData.customer_id).trim() === String(customerId).trim()) ||
+          (orderData.userId && String(orderData.userId).trim() === String(customerId).trim()) ||
+          (orderData.user_id && String(orderData.user_id).trim() === String(customerId).trim()) ||
+          (orderData.uid && String(orderData.uid).trim() === String(customerId).trim()) ||
+          // Email match (fallback)
+          (orderData.customerEmail && String(orderData.customerEmail).trim() === String(customerEmail).trim()) ||
+          (orderData.customer_email && String(orderData.customer_email).trim() === String(customerEmail).trim()) ||
+          (orderData.email && String(orderData.email).trim() === String(customerEmail).trim());
+
+        if (isMatch) {
+          console.log('[CustomerAccount] ✅ Order matched:', doc.id, 'Status:', orderData.status);
+          loadedOrders.push({
+            id: doc.id,
+            ...orderData,
+          });
+        }
       });
 
-      console.log('[CustomerAccount] Orders found:', loadedOrders.length);
+      console.log('[CustomerAccount] Total matching orders:', loadedOrders.length);
 
       // Sort by date (newest first)
       loadedOrders.sort((a, b) => {
@@ -75,9 +107,11 @@ function CustomerAccountContent() {
       });
 
       setOrders(loadedOrders);
+      setDebugInfo(`Found ${loadedOrders.length} orders\n${debugMessages.join('\n')}`);
       applyFilters(loadedOrders, 'all', '');
     } catch (error) {
       console.error('[CustomerAccount] Error loading orders:', error);
+      setDebugInfo(`Error loading orders: ${error.message}`);
       setOrders([]);
     }
   };
@@ -87,11 +121,15 @@ function CustomerAccountContent() {
   }, [filterStatus, searchTerm, orders]);
 
   const applyFilters = (ordersList, status, search) => {
-    let filtered = ordersList;
+    let filtered = [...ordersList];
 
     // Filter by status
     if (status !== 'all') {
-      filtered = filtered.filter((order) => order.status === status);
+      filtered = filtered.filter((order) => {
+        const orderStatus = String(order.status || '').toLowerCase();
+        const filterStatusLower = String(status).toLowerCase();
+        return orderStatus === filterStatusLower;
+      });
     }
 
     // Filter by search term
@@ -211,15 +249,20 @@ function CustomerAccountContent() {
               <p className="text-xs text-gray-400">{customer.email}</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={handleLogout} className="p-2 hover:bg-red-500/20 rounded-lg transition text-red-400">
-              <LogOut size={20} />
-            </button>
-          </div>
+          <button onClick={handleLogout} className="p-2 hover:bg-red-500/20 rounded-lg transition text-red-400">
+            <LogOut size={20} />
+          </button>
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
+        {/* Debug Info */}
+        {debugInfo && (
+          <div className="bg-blue-900/30 border border-blue-500/50 rounded-lg p-3">
+            <p className="text-blue-400 text-xs whitespace-pre-wrap font-mono">{debugInfo}</p>
+          </div>
+        )}
+
         {/* Profile Section */}
         <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
           <h2 className="text-xl font-bold text-white mb-4">Profile Information</h2>
@@ -252,19 +295,19 @@ function CustomerAccountContent() {
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
             <p className="text-gray-400 text-sm">Paid</p>
             <p className="text-3xl font-bold text-green-400 mt-2">
-              {orders.filter((o) => o.status === 'paid').length}
+              {orders.filter((o) => String(o.status || '').toLowerCase() === 'paid').length}
             </p>
           </div>
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
             <p className="text-gray-400 text-sm">Pending</p>
             <p className="text-3xl font-bold text-yellow-400 mt-2">
-              {orders.filter((o) => o.status === 'pending_payment').length}
+              {orders.filter((o) => String(o.status || '').toLowerCase() === 'pending_payment').length}
             </p>
           </div>
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
             <p className="text-gray-400 text-sm">Cancelled</p>
             <p className="text-3xl font-bold text-red-400 mt-2">
-              {orders.filter((o) => o.status === 'cancelled_payment').length}
+              {orders.filter((o) => String(o.status || '').toLowerCase() === 'cancelled_payment').length}
             </p>
           </div>
         </div>
