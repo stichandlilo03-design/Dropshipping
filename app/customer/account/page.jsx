@@ -3,11 +3,12 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Search, Eye, Trash2, ArrowLeft, LogOut, Settings, Package, ShoppingCart, Heart, Bell } from 'lucide-react';
+import { Search, Eye, ArrowLeft, LogOut, Settings, ShoppingCart, Heart, Bell, Package } from 'lucide-react';
+import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 function CustomerAccountContent() {
   const router = useRouter();
-  const [user, setUser] = useState(null);
   const [customer, setCustomer] = useState(null);
   const [orders, setOrders] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -31,7 +32,7 @@ function CustomerAccountContent() {
         console.log('[CustomerAccount] Token:', token ? 'exists' : 'missing');
 
         if (!customerData || !token) {
-          console.log('[CustomerAccount] No customer data or token, redirecting to login');
+          console.log('[CustomerAccount] No customer data, redirecting to login');
           router.push('/customer/login');
           return;
         }
@@ -40,8 +41,8 @@ function CustomerAccountContent() {
         console.log('[CustomerAccount] Parsed customer:', parsedCustomer);
         setCustomer(parsedCustomer);
 
-        // Load orders for this customer
-        await loadCustomerOrders(parsedCustomer.id, parsedCustomer.email);
+        // Load orders directly from Firestore
+        await loadCustomerOrdersFromFirestore(parsedCustomer.id, parsedCustomer.email);
         setLoading(false);
       } catch (error) {
         console.error('[CustomerAccount] Error:', error);
@@ -52,26 +53,32 @@ function CustomerAccountContent() {
     loadData();
   }, [router]);
 
-  const loadCustomerOrders = async (customerId, customerEmail) => {
+  const loadCustomerOrdersFromFirestore = async (customerId, customerEmail) => {
     try {
-      console.log('[CustomerAccount] Loading orders for:', customerId, customerEmail);
+      console.log('[CustomerAccount] Loading orders from Firestore for:', customerId, customerEmail);
 
-      // Fetch from Firestore
-      const response = await fetch('/api/orders', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ customerId, customerEmail }),
+      const ordersRef = collection(db, 'orders');
+      const ordersSnap = await getDocs(ordersRef);
+
+      const customerOrders = [];
+
+      ordersSnap.forEach(doc => {
+        const orderData = doc.data();
+        
+        // Match by customerId OR customerEmail
+        if (
+          (orderData.customerId && orderData.customerId === customerId) ||
+          (orderData.customerEmail && orderData.customerEmail === customerEmail)
+        ) {
+          customerOrders.push({
+            id: doc.id,
+            ...orderData,
+          });
+        }
       });
 
-      const data = await response.json();
-
-      if (data.success) {
-        console.log('[CustomerAccount] Orders loaded:', data.orders.length);
-        setOrders(data.orders || []);
-      } else {
-        console.error('[CustomerAccount] Error:', data.error);
-        setOrders([]);
-      }
+      console.log('[CustomerAccount] Orders found:', customerOrders.length);
+      setOrders(customerOrders);
     } catch (err) {
       console.error('[CustomerAccount] Error loading orders:', err);
       setOrders([]);
@@ -173,13 +180,15 @@ function CustomerAccountContent() {
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
-        {/* Customer Info */}
+        {/* Customer Info Card */}
         <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
-          <h2 className="text-xl font-bold text-white mb-4">Profile Info</h2>
+          <h2 className="text-xl font-bold text-white mb-4">Profile Information</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <p className="text-gray-400 text-sm">Full Name</p>
-              <p className="text-white font-semibold">{customer.firstName} {customer.lastName}</p>
+              <p className="text-white font-semibold">
+                {customer.firstName} {customer.lastName || ''}
+              </p>
             </div>
             <div>
               <p className="text-gray-400 text-sm">Email</p>
@@ -190,29 +199,27 @@ function CustomerAccountContent() {
               <p className="text-white font-semibold">{customer.phone || 'Not added'}</p>
             </div>
             <div>
-              <p className="text-gray-400 text-sm">Member Since</p>
-              <p className="text-white font-semibold">
-                {customer.created_at ? new Date(customer.created_at).toLocaleDateString() : 'Recently'}
-              </p>
+              <p className="text-gray-400 text-sm">Customer ID</p>
+              <p className="text-white font-mono text-sm">{customer.id?.substring(0, 12)}...</p>
             </div>
           </div>
         </div>
 
-        {/* Stats */}
+        {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
             <p className="text-gray-400 text-sm">Total Orders</p>
-            <p className="text-3xl font-bold text-blue-400">{orders.length}</p>
+            <p className="text-3xl font-bold text-blue-400 mt-2">{orders.length}</p>
           </div>
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
             <p className="text-gray-400 text-sm">Total Spent</p>
-            <p className="text-3xl font-bold text-green-400">
+            <p className="text-3xl font-bold text-green-400 mt-2">
               ${orders.reduce((sum, o) => sum + (parseFloat(o.total) || 0), 0).toFixed(2)}
             </p>
           </div>
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
             <p className="text-gray-400 text-sm">Pending Orders</p>
-            <p className="text-3xl font-bold text-orange-400">
+            <p className="text-3xl font-bold text-orange-400 mt-2">
               {orders.filter(o => o.status === 'pending' || o.status === 'pending_payment').length}
             </p>
           </div>
@@ -222,35 +229,35 @@ function CustomerAccountContent() {
         <div className="border-b border-slate-700 flex gap-4">
           <button
             onClick={() => setActiveTab('orders')}
-            className={`px-4 py-3 font-semibold border-b-2 transition ${
+            className={`px-4 py-3 font-semibold border-b-2 transition flex items-center gap-2 ${
               activeTab === 'orders'
                 ? 'border-blue-500 text-white'
                 : 'border-transparent text-gray-400 hover:text-white'
             }`}
           >
-            <ShoppingCart size={18} className="inline mr-2" />
+            <ShoppingCart size={18} />
             Orders ({orders.length})
           </button>
           <button
             onClick={() => setActiveTab('wishlist')}
-            className={`px-4 py-3 font-semibold border-b-2 transition ${
+            className={`px-4 py-3 font-semibold border-b-2 transition flex items-center gap-2 ${
               activeTab === 'wishlist'
                 ? 'border-blue-500 text-white'
                 : 'border-transparent text-gray-400 hover:text-white'
             }`}
           >
-            <Heart size={18} className="inline mr-2" />
+            <Heart size={18} />
             Wishlist
           </button>
           <button
             onClick={() => setActiveTab('settings')}
-            className={`px-4 py-3 font-semibold border-b-2 transition ${
+            className={`px-4 py-3 font-semibold border-b-2 transition flex items-center gap-2 ${
               activeTab === 'settings'
                 ? 'border-blue-500 text-white'
                 : 'border-transparent text-gray-400 hover:text-white'
             }`}
           >
-            <Bell size={18} className="inline mr-2" />
+            <Bell size={18} />
             Notifications
           </button>
         </div>
@@ -258,7 +265,7 @@ function CustomerAccountContent() {
         {/* Orders Tab */}
         {activeTab === 'orders' && (
           <div className="space-y-6">
-            {/* Controls */}
+            {/* Search & Filter */}
             <div className="flex flex-col md:flex-row gap-4">
               <div className="flex-1 relative">
                 <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" />
@@ -303,11 +310,13 @@ function CustomerAccountContent() {
                       filteredOrders.map((order) => (
                         <tr key={order.id} className="border-b border-slate-700 hover:bg-slate-700/50 transition">
                           <td className="px-6 py-4 text-sm font-mono text-white">{order.id.substring(0, 8)}...</td>
-                          <td className="px-6 py-4 text-sm text-gray-300">{order.productName}</td>
+                          <td className="px-6 py-4 text-sm text-gray-300 line-clamp-1">{order.productName || 'N/A'}</td>
                           <td className="px-6 py-4 text-sm text-gray-300">
                             {order.createdAt ? new Date(order.createdAt).toLocaleDateString() : 'N/A'}
                           </td>
-                          <td className="px-6 py-4 text-sm font-semibold text-green-400">${order.total?.toFixed(2)}</td>
+                          <td className="px-6 py-4 text-sm font-semibold text-green-400">
+                            ${parseFloat(order.total || 0).toFixed(2)}
+                          </td>
                           <td className="px-6 py-4">
                             <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(order.status)}`}>
                               {getDisplayStatus(order.status)}
@@ -329,7 +338,7 @@ function CustomerAccountContent() {
                     ) : (
                       <tr>
                         <td colSpan="6" className="px-6 py-8 text-center text-gray-400">
-                          No orders found. Start shopping! 🛍️
+                          {orders.length === 0 ? 'No orders yet. Start shopping! 🛍️' : 'No orders match your search'}
                         </td>
                       </tr>
                     )}
@@ -358,15 +367,15 @@ function CustomerAccountContent() {
             <div className="space-y-3">
               <label className="flex items-center gap-3 cursor-pointer">
                 <input type="checkbox" defaultChecked className="w-4 h-4 accent-blue-500" />
-                <span className="text-gray-300">Email notifications for orders</span>
+                <span className="text-gray-300">Order confirmation emails</span>
               </label>
               <label className="flex items-center gap-3 cursor-pointer">
                 <input type="checkbox" defaultChecked className="w-4 h-4 accent-blue-500" />
-                <span className="text-gray-300">SMS notifications for shipments</span>
+                <span className="text-gray-300">Shipment tracking notifications</span>
               </label>
               <label className="flex items-center gap-3 cursor-pointer">
                 <input type="checkbox" className="w-4 h-4 accent-blue-500" />
-                <span className="text-gray-300">Marketing emails</span>
+                <span className="text-gray-300">Promotional offers and updates</span>
               </label>
             </div>
             <button className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold mt-6">
@@ -376,7 +385,7 @@ function CustomerAccountContent() {
         )}
       </div>
 
-      {/* Modal */}
+      {/* Order Details Modal */}
       {showModal && selectedOrder && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-slate-800 rounded-lg max-w-2xl w-full border border-slate-700 p-8 max-h-96 overflow-y-auto">
@@ -409,7 +418,7 @@ function CustomerAccountContent() {
 
               <div>
                 <p className="text-gray-400 text-sm">Product</p>
-                <p className="text-white font-semibold">{selectedOrder.productName}</p>
+                <p className="text-white font-semibold">{selectedOrder.productName || 'N/A'}</p>
               </div>
 
               <div className="border-t border-slate-700 pt-4">
@@ -417,15 +426,21 @@ function CustomerAccountContent() {
                 <div className="grid grid-cols-3 gap-4">
                   <div>
                     <p className="text-gray-400 text-xs">Subtotal</p>
-                    <p className="text-blue-400 text-lg font-bold">${selectedOrder.subtotal?.toFixed(2)}</p>
+                    <p className="text-blue-400 text-lg font-bold">
+                      ${parseFloat(selectedOrder.subtotal || 0).toFixed(2)}
+                    </p>
                   </div>
                   <div>
                     <p className="text-gray-400 text-xs">Tax</p>
-                    <p className="text-yellow-400 text-lg font-bold">${selectedOrder.tax?.toFixed(2)}</p>
+                    <p className="text-yellow-400 text-lg font-bold">
+                      ${parseFloat(selectedOrder.tax || 0).toFixed(2)}
+                    </p>
                   </div>
                   <div>
                     <p className="text-gray-400 text-xs">Total</p>
-                    <p className="text-green-400 text-lg font-bold">${selectedOrder.total?.toFixed(2)}</p>
+                    <p className="text-green-400 text-lg font-bold">
+                      ${parseFloat(selectedOrder.total || 0).toFixed(2)}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -437,14 +452,12 @@ function CustomerAccountContent() {
                 </span>
               </div>
 
-              <div className="flex gap-2 pt-4 border-t border-slate-700">
-                <button
-                  onClick={() => setShowModal(false)}
-                  className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg font-semibold transition"
-                >
-                  Close
-                </button>
-              </div>
+              <button
+                onClick={() => setShowModal(false)}
+                className="w-full bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg font-semibold transition mt-4"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>
