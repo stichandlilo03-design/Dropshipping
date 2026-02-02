@@ -40,3 +40,12 @@
     "@types/react-dom": "^18.2.18"
   }
 }
+  "dependencies": {
+    "@stripe/js": "^3.0.0",
+    "stripe": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/stripe": "^14.0.0"
+  }
+}
+
