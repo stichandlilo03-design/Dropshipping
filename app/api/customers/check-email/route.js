@@ -8,7 +8,10 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request) {
   try {
-    const { email } = await request.json();
+    const body = await request.json();
+    const email = body.email?.toLowerCase();
+
+    console.log('[Check Email] Checking email:', email);
 
     if (!email) {
       return NextResponse.json(
@@ -17,33 +20,30 @@ export async function POST(request) {
       );
     }
 
-    console.log('[Check Email] Checking:', email);
-
     // Query Firestore for customer with this email
     const customersRef = collection(db, 'customers');
-    const q = query(customersRef, where('email', '==', email.toLowerCase()));
+    const q = query(customersRef, where('email', '==', email));
+    
     const querySnapshot = await getDocs(q);
-
     const exists = !querySnapshot.empty;
-    const customer = exists ? querySnapshot.docs[0].data() : null;
 
-    console.log('[Check Email] Email exists:', exists);
+    console.log('[Check Email] Found:', exists, 'Documents:', querySnapshot.size);
+
+    if (exists) {
+      const customerData = querySnapshot.docs[0].data();
+      console.log('[Check Email] Customer found:', customerData.email);
+    }
 
     return NextResponse.json({
       success: true,
       exists: exists,
-      customer: customer ? {
-        id: querySnapshot.docs[0].id,
-        email: customer.email,
-        firstName: customer.firstName,
-        lastName: customer.lastName,
-      } : null
+      email: email
     });
 
   } catch (error) {
-    console.error('[Check Email] Error:', error);
+    console.error('[Check Email API] Error:', error.message);
     return NextResponse.json(
-      { success: false, error: error.message },
+      { success: false, error: error.message || 'Server error' },
       { status: 500 }
     );
   }
