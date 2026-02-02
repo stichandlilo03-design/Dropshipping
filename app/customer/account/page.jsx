@@ -267,9 +267,14 @@ function CustomerDashboardContent() {
                 )}
               </Link>
 
-              <button className="p-2 hover:bg-slate-700 rounded-lg transition">
-                <Settings size={20} className="text-gray-400" />
-              </button>
+              {/* Settings Button - NOW CLICKABLE */}
+              <Link
+                href="/customer/settings"
+                className="p-2 hover:bg-slate-700 rounded-lg transition"
+                title="Settings"
+              >
+                <Settings size={20} className="text-gray-400 hover:text-blue-400" />
+              </Link>
               <button onClick={handleLogout} className="p-2 hover:bg-red-500/20 rounded-lg transition text-red-400">
                 <LogOut size={20} />
               </button>
