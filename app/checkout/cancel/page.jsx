@@ -3,13 +3,17 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, ShoppingCart, AlertCircle, Home } from 'lucide-react';
+import { ArrowLeft, ShoppingCart, AlertCircle, Home, Save } from 'lucide-react';
+import { collection, addDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 function CancelContent() {
   const router = useRouter();
   const [cart, setCart] = useState([]);
   const [customer, setCustomer] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [orderSaved, setOrderSaved] = useState(false);
 
   useEffect(() => {
     // Get cart from localStorage
@@ -35,7 +39,70 @@ function CancelContent() {
     }
 
     setLoading(false);
+
+    // Auto-save cancelled order to history
+    saveOrderToHistory();
   }, []);
+
+  const saveOrderToHistory = async () => {
+    try {
+      const customerData = localStorage.getItem('customer');
+      const cartData = localStorage.getItem('cart');
+
+      if (!customerData || !cartData) {
+        return;
+      }
+
+      const customer = JSON.parse(customerData);
+      const cart = JSON.parse(cartData);
+
+      if (cart.length === 0) {
+        return;
+      }
+
+      setSavingOrder(true);
+
+      const subtotal = cart.reduce((sum, item) => sum + (parseFloat(item.price) * (item.quantity || 1)), 0);
+      const tax = subtotal * 0.08;
+      const total = subtotal + tax + 10; // +10 for shipping
+
+      const orderData = {
+        id: `cancelled_${Date.now()}`,
+        stripeSessionId: `cancelled_${Date.now()}`,
+        customerId: customer.id,
+        customerName: customer.firstName || 'Customer',
+        customerEmail: customer.email,
+        customerPhone: customer.phone || '',
+        items: cart.map(item => ({
+          productId: item.productId || item.id,
+          productName: item.name || item.productName,
+          price: parseFloat(item.price),
+          quantity: parseInt(item.quantity) || 1,
+          image: item.image,
+        })),
+        subtotal: parseFloat(subtotal.toFixed(2)),
+        tax: parseFloat(tax.toFixed(2)),
+        total: parseFloat(total.toFixed(2)),
+        shippingAddress: {},
+        status: 'cancelled_payment', // Special status for cancelled payments
+        reason: 'Customer cancelled checkout',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      console.log('[Cancel] Saving cancelled order to history:', orderData);
+
+      const ordersRef = collection(db, 'orders');
+      await addDoc(ordersRef, orderData);
+
+      console.log('[Cancel] Order saved to history');
+      setOrderSaved(true);
+      setSavingOrder(false);
+    } catch (err) {
+      console.error('[Cancel] Error saving order:', err);
+      setSavingOrder(false);
+    }
+  };
 
   const cartTotal = cart.reduce((sum, item) => sum + (parseFloat(item.price) * (item.quantity || 1)), 0);
   const tax = cartTotal * 0.08;
@@ -70,6 +137,19 @@ function CancelContent() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Main Content */}
           <div className="lg:col-span-2 space-y-6">
+            {/* Order Saved Status */}
+            {orderSaved && (
+              <div className="bg-green-900/30 border border-green-500/50 rounded-lg p-6 flex gap-4">
+                <Save size={24} className="text-green-400 flex-shrink-0 mt-1" />
+                <div>
+                  <h2 className="text-lg font-bold text-green-200 mb-2">Activity Saved</h2>
+                  <p className="text-green-100">
+                    This cancelled payment has been saved to your order history for reference.
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Alert Box */}
             <div className="bg-yellow-900/30 border border-yellow-500/50 rounded-lg p-6 flex gap-4">
               <AlertCircle size={24} className="text-yellow-400 flex-shrink-0 mt-1" />
@@ -90,6 +170,9 @@ function CancelContent() {
                 </p>
                 <p>
                   ✅ <span className="text-white font-semibold">No charge</span> was made to your card
+                </p>
+                <p>
+                  ✅ This activity is <span className="text-white font-semibold">saved in your order history</span>
                 </p>
                 <p>
                   ✅ You can <span className="text-white font-semibold">retry checkout</span> anytime
@@ -173,9 +256,9 @@ function CancelContent() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-white font-semibold mb-2">Why did the payment fail?</p>
+                  <p className="text-white font-semibold mb-2">Is this saved in my history?</p>
                   <p className="text-gray-400 text-sm">
-                    Common reasons: You cancelled the payment, there was an issue with your card, or your bank declined the transaction. Please try again or contact your bank.
+                    Yes! This cancelled checkout is saved in your order history for your records.
                   </p>
                 </div>
                 <div>
@@ -241,6 +324,15 @@ function CancelContent() {
                 <Home size={20} />
                 Continue Shopping
               </Link>
+
+              {customer && (
+                <Link
+                  href="/customer/account"
+                  className="w-full mt-3 bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-bold transition text-center block"
+                >
+                  View Order History
+                </Link>
+              )}
             </div>
           </div>
         </div>
