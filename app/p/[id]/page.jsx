@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { doc, getDoc, addDoc, collection, getDocs, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, addDoc, collection, getDocs, updateDoc, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { ArrowLeft, Star, ShoppingCart, Heart, Copy, Check, Truck, Shield, RefreshCw, Mail, AlertCircle, Loader, X, Plus, Minus, TrendingUp, Eye, Zap, Lock, CreditCard, Trash2 } from 'lucide-react';
 
@@ -28,6 +28,9 @@ export default function ProductPage() {
   const [showSuccess, setShowSuccess] = useState(false);
   const [formErrors, setFormErrors] = useState({});
   const [cartLoaded, setCartLoaded] = useState(false);
+  const [emailCheckLoading, setEmailCheckLoading] = useState(false);
+  const [emailExists, setEmailExists] = useState(null);
+  const [checkoutStep, setCheckoutStep] = useState('form'); // form, email-check, success
   
   const [formData, setFormData] = useState({
     email: '',
@@ -105,7 +108,6 @@ export default function ProductPage() {
           setProduct(productData);
           await loadRelatedProducts(productData);
 
-          // Increment view count directly in Firestore
           try {
             const currentViews = productData.views || 0;
             await updateDoc(productRef, {
@@ -113,14 +115,12 @@ export default function ProductPage() {
               lastViewed: new Date().toISOString(),
             });
             
-            // Update local state to show new view count
             setProduct(prev => ({
               ...prev,
               views: currentViews + 1
             }));
           } catch (err) {
             console.log('[Views] Note: Could not update views:', err.message);
-            // Don't fail the page load if views update fails
           }
         } else {
           setError('Product not found');
@@ -231,83 +231,62 @@ export default function ProductPage() {
     return Object.keys(errors).length === 0;
   };
 
-  const handleCheckout = async (e) => {
+  // Check if email exists in database
+  const checkEmailExists = async (email) => {
+    try {
+      setEmailCheckLoading(true);
+      
+      const customersRef = collection(db, 'customers');
+      const q = query(customersRef, where('email', '==', email));
+      const querySnapshot = await getDocs(q);
+      
+      const exists = !querySnapshot.empty;
+      setEmailExists(exists);
+      
+      return exists;
+    } catch (err) {
+      console.error('[Email Check] Error:', err);
+      setCheckoutError('Error checking email. Please try again.');
+      return false;
+    } finally {
+      setEmailCheckLoading(false);
+    }
+  };
+
+  // NEW: Email check and redirect flow
+  const handleEmailCheck = async (e) => {
     e.preventDefault();
     
-    if (!validateForm()) return;
-    if (cart.length === 0) {
-      setCheckoutError('Your cart is empty');
+    // Validate email field
+    if (!formData.email || !formData.email.includes('@')) {
+      setFormErrors({ email: 'Valid email required' });
       return;
     }
 
-    try {
-      setCheckoutLoading(true);
-      setCheckoutError(null);
+    setCheckoutError(null);
+    const exists = await checkEmailExists(formData.email);
+    
+    // Save checkout data to localStorage before redirecting
+    const checkoutData = {
+      email: formData.email,
+      fullName: formData.fullName,
+      phone: formData.phone,
+      address: formData.address,
+      city: formData.city,
+      state: formData.state,
+      zipCode: formData.zipCode,
+      country: formData.country,
+      cartData: cart,
+      timestamp: new Date().toISOString()
+    };
+    localStorage.setItem('pendingCheckout', JSON.stringify(checkoutData));
 
-      const orderIds = [];
-      
-      for (const cartItem of cart) {
-        const orderData = {
-          productId: cartItem.id,
-          productName: cartItem.name,
-          productPrice: parseFloat(cartItem.price),
-          quantity: cartItem.quantity,
-          subtotal: parseFloat((cartItem.price * cartItem.quantity).toFixed(2)),
-          shipping: shipping / cart.length,
-          tax: tax / cart.length,
-          total: grandTotal,
-          
-          customerEmail: formData.email,
-          customerName: formData.fullName,
-          customerPhone: formData.phone,
-          customerAddress: formData.address,
-          customerCity: formData.city,
-          customerState: formData.state,
-          customerZipCode: formData.zipCode,
-          customerCountry: formData.country,
-          
-          status: 'pending_payment',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-
-        const orderRef = await addDoc(collection(db, 'orders'), orderData);
-        orderIds.push(orderRef.id);
-      }
-
-      const firstCartItem = cart[0];
-      const response = await fetch('/api/stripe/checkout', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          orderId: orderIds[0],
-          productId: firstCartItem.id,
-          productName: firstCartItem.name,
-          productPrice: firstCartItem.price,
-          quantity: cartItemCount,
-          customerEmail: formData.email,
-          customerName: formData.fullName,
-          shippingCost: shipping,
-          tax: tax,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (data.success && data.checkoutUrl) {
-        // Clear cart after successful checkout initiation
-        clearCart();
-        window.location.href = data.checkoutUrl;
-      } else {
-        setCheckoutError(data.error || 'Failed to create checkout session');
-      }
-    } catch (err) {
-      console.error('[Checkout] Error:', err);
-      setCheckoutError(err.message || 'An error occurred during checkout');
-    } finally {
-      setCheckoutLoading(false);
+    if (exists) {
+      // Email exists - redirect to login
+      window.location.href = `/customer/login?email=${encodeURIComponent(formData.email)}&checkout=true`;
+    } else {
+      // Email doesn't exist - redirect to register
+      window.location.href = `/customer/register?email=${encodeURIComponent(formData.email)}&checkout=true`;
     }
   };
 
@@ -365,29 +344,29 @@ export default function ProductPage() {
       {/* Header */}
       <div className="bg-slate-800/50 border-b border-slate-700 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-  <div className="flex items-center gap-4">
-    <Link href="/" className="text-blue-400 hover:text-blue-300 flex items-center gap-2 text-sm sm:text-base">
-      <ArrowLeft size={20} />
-      <span className="hidden sm:inline">Back</span>
-    </Link>
-    
-    {/* Customer Auth Links */}
-    <div className="hidden sm:flex items-center gap-2 ml-4 pl-4 border-l border-slate-600">
-      <Link 
-        href="/customer/login" 
-        className="text-gray-400 hover:text-white text-sm font-medium transition"
-      >
-        Login
-      </Link>
-      <span className="text-gray-600">•</span>
-      <Link 
-        href="/customer/register" 
-        className="text-blue-400 hover:text-blue-300 text-sm font-medium transition"
-      >
-        Register
-      </Link>
-    </div>
-  </div>
+          <div className="flex items-center gap-4">
+            <Link href="/" className="text-blue-400 hover:text-blue-300 flex items-center gap-2 text-sm sm:text-base">
+              <ArrowLeft size={20} />
+              <span className="hidden sm:inline">Back</span>
+            </Link>
+            
+            {/* Customer Auth Links */}
+            <div className="hidden sm:flex items-center gap-2 ml-4 pl-4 border-l border-slate-600">
+              <Link 
+                href="/customer/login" 
+                className="text-gray-400 hover:text-white text-sm font-medium transition"
+              >
+                Login
+              </Link>
+              <span className="text-gray-600">•</span>
+              <Link 
+                href="/customer/register" 
+                className="text-blue-400 hover:text-blue-300 text-sm font-medium transition"
+              >
+                Register
+              </Link>
+            </div>
+          </div>
           <h1 className="text-base sm:text-lg font-bold text-white">🛍️ Product</h1>
           <div className="flex items-center gap-2 sm:gap-4 relative">
             {/* Cart Button */}
@@ -881,17 +860,17 @@ export default function ProductPage() {
         </div>
       </div>
 
-      {/* CHECKOUT MODAL */}
+      {/* CHECKOUT MODAL - SIMPLIFIED EMAIL CHECK */}
       {showCheckout && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="w-full max-w-5xl bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl my-8">
+          <div className="w-full max-w-2xl bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl my-8">
             {/* Header */}
             <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-4 sm:px-6 lg:px-8 py-4 sm:py-6 flex items-center justify-between rounded-t-2xl gap-3">
               <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                 <Lock size={24} className="text-white flex-shrink-0" />
                 <div className="min-w-0">
-                  <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold text-white truncate">Secure Checkout</h2>
-                  <p className="text-blue-100 text-xs sm:text-sm">Protected by Stripe</p>
+                  <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold text-white truncate">Checkout</h2>
+                  <p className="text-blue-100 text-xs sm:text-sm">Step 1: Verify Email</p>
                 </div>
               </div>
               <button
@@ -903,251 +882,77 @@ export default function ProductPage() {
             </div>
 
             {/* Content */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8 p-4 sm:p-6 lg:p-8 overflow-y-auto max-h-[calc(100vh-200px)]">
-              {/* Form */}
-              <div className="lg:col-span-2 w-full">
-                {checkoutError && (
-                  <div className="mb-6 bg-red-900/30 border border-red-500 text-red-200 p-3 sm:p-4 rounded-lg flex gap-2 sm:gap-3">
-                    <AlertCircle size={18} className="flex-shrink-0 mt-0.5" />
-                    <p className="text-xs sm:text-sm">{checkoutError}</p>
+            <div className="p-4 sm:p-6 lg:p-8">
+              {checkoutError && (
+                <div className="mb-6 bg-red-900/30 border border-red-500 text-red-200 p-3 sm:p-4 rounded-lg flex gap-2 sm:gap-3">
+                  <AlertCircle size={18} className="flex-shrink-0 mt-0.5" />
+                  <p className="text-xs sm:text-sm">{checkoutError}</p>
+                </div>
+              )}
+
+              <form onSubmit={handleEmailCheck} className="space-y-4 sm:space-y-6 max-w-md">
+                <div>
+                  <label className="block text-xs sm:text-sm text-gray-300 mb-1.5 sm:mb-2 font-semibold">Email Address</label>
+                  <p className="text-xs text-gray-400 mb-2">We'll check if you have an account with us</p>
+                  <input
+                    type="email"
+                    name="email"
+                    placeholder="you@example.com"
+                    value={formData.email}
+                    onChange={handleInputChange}
+                    className={`w-full px-3 sm:px-4 py-3 bg-slate-700 text-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
+                      formErrors.email ? 'border-red-500' : 'border-slate-600'
+                    }`}
+                  />
+                  {formErrors.email && <p className="text-red-400 text-xs mt-1">{formErrors.email}</p>}
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={emailCheckLoading}
+                  className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:from-gray-600 disabled:to-gray-600 text-white py-3 rounded-lg font-bold text-base transition flex items-center justify-center gap-2"
+                >
+                  {emailCheckLoading ? (
+                    <>
+                      <Loader size={18} className="animate-spin" />
+                      <span>Checking...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Mail size={18} />
+                      Continue
+                    </>
+                  )}
+                </button>
+
+                <p className="text-xs text-gray-400 text-center">
+                  ✅ Your data is secure
+                </p>
+              </form>
+
+              {/* Order Summary */}
+              <div className="mt-8 pt-8 border-t border-slate-700">
+                <h3 className="text-sm font-bold text-white mb-4 flex items-center gap-2">
+                  <ShoppingCart size={16} />
+                  Order Summary
+                </h3>
+                <div className="bg-slate-700/50 rounded-lg p-3 space-y-2 text-xs">
+                  <div className="flex justify-between text-gray-300">
+                    <span>Subtotal</span>
+                    <span>${cartTotal.toFixed(2)}</span>
                   </div>
-                )}
-
-                <form onSubmit={handleCheckout} className="space-y-4 sm:space-y-6">
-                  {/* Contact */}
-                  <div className="w-full">
-                    <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
-                      <div className="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">1</div>
-                      <h3 className="text-base sm:text-lg font-bold text-white">Contact</h3>
-                    </div>
-                    
-                    <div className="space-y-3 sm:space-y-4 bg-slate-700/50 p-3 sm:p-4 rounded-lg border border-slate-600">
-                      <div>
-                        <label className="block text-xs sm:text-sm text-gray-300 mb-1.5 sm:mb-2">Email</label>
-                        <input
-                          type="email"
-                          name="email"
-                          placeholder="you@example.com"
-                          value={formData.email}
-                          onChange={handleInputChange}
-                          className={`w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-800 text-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm ${
-                            formErrors.email ? 'border-red-500' : 'border-slate-600'
-                          }`}
-                        />
-                        {formErrors.email && <p className="text-red-400 text-xs mt-1">{formErrors.email}</p>}
-                      </div>
-
-                      <div>
-                        <label className="block text-xs sm:text-sm text-gray-300 mb-1.5 sm:mb-2">Full Name</label>
-                        <input
-                          type="text"
-                          name="fullName"
-                          placeholder="John Doe"
-                          value={formData.fullName}
-                          onChange={handleInputChange}
-                          className={`w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-800 text-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm ${
-                            formErrors.fullName ? 'border-red-500' : 'border-slate-600'
-                          }`}
-                        />
-                        {formErrors.fullName && <p className="text-red-400 text-xs mt-1">{formErrors.fullName}</p>}
-                      </div>
-
-                      <div>
-                        <label className="block text-xs sm:text-sm text-gray-300 mb-1.5 sm:mb-2">Phone</label>
-                        <input
-                          type="tel"
-                          name="phone"
-                          placeholder="+1 (555) 000-0000"
-                          value={formData.phone}
-                          onChange={handleInputChange}
-                          className={`w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-800 text-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm ${
-                            formErrors.phone ? 'border-red-500' : 'border-slate-600'
-                          }`}
-                        />
-                        {formErrors.phone && <p className="text-red-400 text-xs mt-1">{formErrors.phone}</p>}
-                      </div>
-                    </div>
+                  <div className="flex justify-between text-gray-300">
+                    <span>Shipping</span>
+                    <span>$10.00</span>
                   </div>
-
-                  {/* Address */}
-                  <div className="w-full">
-                    <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
-                      <div className="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">2</div>
-                      <h3 className="text-base sm:text-lg font-bold text-white">Address</h3>
-                    </div>
-                    
-                    <div className="space-y-3 sm:space-y-4 bg-slate-700/50 p-3 sm:p-4 rounded-lg border border-slate-600">
-                      <div>
-                        <label className="block text-xs sm:text-sm text-gray-300 mb-1.5 sm:mb-2">Street</label>
-                        <input
-                          type="text"
-                          name="address"
-                          placeholder="123 Main Street"
-                          value={formData.address}
-                          onChange={handleInputChange}
-                          className={`w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-800 text-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm ${
-                            formErrors.address ? 'border-red-500' : 'border-slate-600'
-                          }`}
-                        />
-                        {formErrors.address && <p className="text-red-400 text-xs mt-1">{formErrors.address}</p>}
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3 sm:gap-4">
-                        <div>
-                          <label className="block text-xs sm:text-sm text-gray-300 mb-1.5 sm:mb-2">City</label>
-                          <input
-                            type="text"
-                            name="city"
-                            placeholder="New York"
-                            value={formData.city}
-                            onChange={handleInputChange}
-                            className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-800 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs sm:text-sm text-gray-300 mb-1.5 sm:mb-2">State</label>
-                          <input
-                            type="text"
-                            name="state"
-                            placeholder="NY"
-                            value={formData.state}
-                            onChange={handleInputChange}
-                            className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-800 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3 sm:gap-4">
-                        <div>
-                          <label className="block text-xs sm:text-sm text-gray-300 mb-1.5 sm:mb-2">ZIP</label>
-                          <input
-                            type="text"
-                            name="zipCode"
-                            placeholder="10001"
-                            value={formData.zipCode}
-                            onChange={handleInputChange}
-                            className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-800 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs sm:text-sm text-gray-300 mb-1.5 sm:mb-2">Country</label>
-                          <select
-                            name="country"
-                            value={formData.country}
-                            onChange={handleInputChange}
-                            className="w-full px-3 sm:px-4 py-2 sm:py-3 bg-slate-800 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-sm"
-                          >
-                            <option>United States</option>
-                            <option>Canada</option>
-                            <option>United Kingdom</option>
-                            <option>Australia</option>
-                            <option>Other</option>
-                          </select>
-                        </div>
-                      </div>
-                    </div>
+                  <div className="flex justify-between text-gray-300">
+                    <span>Tax</span>
+                    <span>${tax.toFixed(2)}</span>
                   </div>
-
-                  {/* Payment */}
-                  <div className="w-full">
-                    <div className="flex items-center gap-2 sm:gap-3 mb-3 sm:mb-4">
-                      <div className="w-8 h-8 bg-blue-600 text-white rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0">3</div>
-                      <h3 className="text-base sm:text-lg font-bold text-white">Payment</h3>
-                    </div>
-                    
-                    <div className="bg-slate-700/50 p-3 sm:p-4 rounded-lg border border-blue-500">
-                      <div className="flex items-center gap-2 sm:gap-3">
-                        <CreditCard size={20} className="text-blue-400 flex-shrink-0" />
-                        <div>
-                          <p className="font-semibold text-white text-xs sm:text-sm">Credit Card</p>
-                          <p className="text-gray-400 text-xs">Secure via Stripe</p>
-                        </div>
-                      </div>
-                    </div>
+                  <div className="border-t border-slate-600 pt-2 flex justify-between text-white font-bold">
+                    <span>Total</span>
+                    <span className="text-green-400">${grandTotal.toFixed(2)}</span>
                   </div>
-
-                  {/* Submit */}
-                  <button
-                    type="submit"
-                    disabled={checkoutLoading}
-                    className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 disabled:from-gray-600 disabled:to-gray-600 text-white py-3 sm:py-4 rounded-lg font-bold text-base sm:text-lg transition flex items-center justify-center gap-2"
-                  >
-                    {checkoutLoading ? (
-                      <>
-                        <Loader size={18} className="animate-spin" />
-                        <span className="hidden sm:inline">Processing...</span>
-                        <span className="sm:hidden">Processing</span>
-                      </>
-                    ) : (
-                      <>
-                        <Lock size={18} />
-                        <span className="hidden sm:inline">Pay</span> ${grandTotal.toFixed(2)}
-                      </>
-                    )}
-                  </button>
-
-                  <p className="text-xs text-gray-400 text-center">
-                    ✅ SSL Secure • 🔒 PCI Compliant • 📦 Fast Shipping
-                  </p>
-                </form>
-              </div>
-
-              {/* Summary */}
-              <div className="lg:col-span-1 w-full">
-                <div className="bg-gradient-to-b from-slate-700 to-slate-800 rounded-lg border border-slate-600 p-3 sm:p-6 sticky top-8">
-                  <h3 className="text-base sm:text-lg font-bold text-white mb-4 sm:mb-6 flex items-center gap-2">
-                    <ShoppingCart size={18} />
-                    Summary
-                  </h3>
-
-                  {/* Items */}
-                  <div className="space-y-2 sm:space-y-3 mb-4 sm:mb-6 pb-4 sm:pb-6 border-b border-slate-600 max-h-48 overflow-y-auto">
-                    {cart.map((item, idx) => (
-                      <div key={idx} className="flex justify-between items-start gap-2 bg-slate-700/50 p-2 sm:p-3 rounded text-xs sm:text-sm">
-                        <div className="flex-1 min-w-0">
-                          <p className="font-semibold text-white line-clamp-2">{item.name}</p>
-                          <p className="text-gray-400 text-xs">Qty: {item.quantity}</p>
-                        </div>
-                        <p className="font-bold text-green-400 flex-shrink-0">${(item.price * item.quantity).toFixed(2)}</p>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Totals */}
-                  <div className="space-y-1 sm:space-y-2 text-xs sm:text-sm mb-4 sm:mb-6">
-                    <div className="flex justify-between text-gray-300">
-                      <span>Subtotal</span>
-                      <span>${cartTotal.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-gray-300">
-                      <span>Shipping</span>
-                      <span>${shipping.toFixed(2)}</span>
-                    </div>
-                    <div className="flex justify-between text-gray-300">
-                      <span>Tax</span>
-                      <span>${tax.toFixed(2)}</span>
-                    </div>
-                    <div className="border-t border-slate-600 pt-1 sm:pt-2 flex justify-between text-white font-bold">
-                      <span>Total</span>
-                      <span className="text-green-400">${grandTotal.toFixed(2)}</span>
-                    </div>
-                  </div>
-
-                  {/* Trust */}
-                  <div className="space-y-1.5 sm:space-y-2 pb-4 sm:pb-6 border-b border-slate-600">
-                    <div className="flex items-center gap-1.5 sm:gap-2 text-xs text-gray-400">
-                      <Lock size={12} className="text-green-400 flex-shrink-0" />
-                      <span>SSL Encrypted</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 sm:gap-2 text-xs text-gray-400">
-                      <Shield size={12} className="text-green-400 flex-shrink-0" />
-                      <span>PCI Compliant</span>
-                    </div>
-                  </div>
-
-                  <p className="text-xs text-gray-400 text-center mt-3 sm:mt-4">
-                    Redirected to Stripe
-                  </p>
                 </div>
               </div>
             </div>
