@@ -266,7 +266,7 @@ function NotificationsContent() {
         <div className="max-w-4xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-4">
-              <Link href="/customer/dashboard" className="p-2 hover:bg-slate-700 rounded-lg transition">
+              <Link href="/customer/account" className="p-2 hover:bg-slate-700 rounded-lg transition">
                 <ArrowLeft size={20} className="text-gray-400" />
               </Link>
               <div>
