@@ -365,10 +365,29 @@ export default function ProductPage() {
       {/* Header */}
       <div className="bg-slate-800/50 border-b border-slate-700 sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
-          <Link href="/" className="text-blue-400 hover:text-blue-300 flex items-center gap-2 text-sm sm:text-base">
-            <ArrowLeft size={20} />
-            <span className="hidden sm:inline">Back</span>
-          </Link>
+  <div className="flex items-center gap-4">
+    <Link href="/" className="text-blue-400 hover:text-blue-300 flex items-center gap-2 text-sm sm:text-base">
+      <ArrowLeft size={20} />
+      <span className="hidden sm:inline">Back</span>
+    </Link>
+    
+    {/* Customer Auth Links */}
+    <div className="hidden sm:flex items-center gap-2 ml-4 pl-4 border-l border-slate-600">
+      <Link 
+        href="/customer/login" 
+        className="text-gray-400 hover:text-white text-sm font-medium transition"
+      >
+        Login
+      </Link>
+      <span className="text-gray-600">•</span>
+      <Link 
+        href="/customer/register" 
+        className="text-blue-400 hover:text-blue-300 text-sm font-medium transition"
+      >
+        Register
+      </Link>
+    </div>
+  </div>
           <h1 className="text-base sm:text-lg font-bold text-white">🛍️ Product</h1>
           <div className="flex items-center gap-2 sm:gap-4 relative">
             {/* Cart Button */}
