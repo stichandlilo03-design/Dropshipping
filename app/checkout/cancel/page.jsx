@@ -1,15 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, ShoppingCart, AlertCircle, Home } from 'lucide-react';
 
-export default function CheckoutCancelPage() {
+function CancelContent() {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [cart, setCart] = useState([]);
   const [customer, setCustomer] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     // Get cart from localStorage
@@ -33,11 +33,24 @@ export default function CheckoutCancelPage() {
         console.error('Error parsing customer:', e);
       }
     }
+
+    setLoading(false);
   }, []);
 
   const cartTotal = cart.reduce((sum, item) => sum + (parseFloat(item.price) * (item.quantity || 1)), 0);
   const tax = cartTotal * 0.08;
   const total = cartTotal + tax + 10; // +10 for shipping
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-400">Loading...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
@@ -206,12 +219,7 @@ export default function CheckoutCancelPage() {
 
                   <button
                     onClick={() => {
-                      if (customer) {
-                        // Navigate to checkout with cart data
-                        window.location.href = '/checkout';
-                      } else {
-                        window.location.href = '/customer/login';
-                      }
+                      window.location.href = '/checkout';
                     }}
                     className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold transition flex items-center justify-center gap-2 mb-3"
                   >
@@ -252,5 +260,24 @@ export default function CheckoutCancelPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function CancelSuspense() {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+        <p className="text-gray-400">Loading...</p>
+      </div>
+    </div>
+  );
+}
+
+export default function CheckoutCancelPage() {
+  return (
+    <Suspense fallback={<CancelSuspense />}>
+      <CancelContent />
+    </Suspense>
   );
 }
