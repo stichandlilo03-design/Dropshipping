@@ -415,33 +415,60 @@ export default function ProductPage() {
                       <div className="divide-y divide-slate-700">
                         {cart.map((item) => (
                           <div key={item.cartId} className="p-3 sm:p-4 hover:bg-slate-700/50 transition">
-                            <div className="flex items-start justify-between mb-2">
-                              <h4 className="text-xs sm:text-sm font-semibold text-white line-clamp-2 flex-1 pr-2">{item.name}</h4>
-                              <button
-                                onClick={() => removeFromCart(item.cartId)}
-                                className="text-red-400 hover:text-red-300 p-1 flex-shrink-0 transition"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
+                            {/* Product Image & Info */}
+                            <div className="flex gap-3 mb-3">
+                              {/* Image */}
+                              {item.image && (
+                                <div className="flex-shrink-0">
+                                  <img
+                                    src={item.image}
+                                    alt={item.name}
+                                    className="w-16 h-16 object-cover rounded-lg border border-slate-600"
+                                  />
+                                </div>
+                              )}
 
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2 bg-slate-700 rounded px-2 py-1">
+                              {/* Details */}
+                              <div className="flex-1 min-w-0">
+                                <h4 className="text-xs sm:text-sm font-semibold text-white line-clamp-2 mb-1">{item.name}</h4>
+                                
+                                {/* Category & Price */}
+                                <div className="space-y-1 mb-2">
+                                  {item.category && (
+                                    <p className="text-xs text-gray-400">{item.category}</p>
+                                  )}
+                                  <p className="text-xs sm:text-sm font-bold text-green-400">${parseFloat(item.price || 0).toFixed(2)}</p>
+                                </div>
+
+                                {/* Delete Button */}
                                 <button
-                                  onClick={() => updateCartQuantity(item.cartId, item.quantity - 1)}
-                                  className="text-gray-400 hover:text-white transition"
+                                  onClick={() => removeFromCart(item.cartId)}
+                                  className="text-red-400 hover:text-red-300 text-xs flex items-center gap-1 transition"
                                 >
-                                  <Minus size={12} />
-                                </button>
-                                <span className="text-white font-bold w-4 text-center text-xs">{item.quantity}</span>
-                                <button
-                                  onClick={() => updateCartQuantity(item.cartId, item.quantity + 1)}
-                                  className="text-gray-400 hover:text-white transition"
-                                >
-                                  <Plus size={12} />
+                                  <Trash2 size={12} />
+                                  Remove
                                 </button>
                               </div>
-                              <p className="text-xs sm:text-sm font-bold text-green-400">${(parseFloat(item.price || 0) * item.quantity).toFixed(2)}</p>
+                            </div>
+
+                            {/* Quantity & Subtotal */}
+                            <div className="flex items-center justify-between bg-slate-700/30 rounded p-2">
+                              <div className="flex items-center gap-2">
+                                <button
+                                  onClick={() => updateCartQuantity(item.cartId, item.quantity - 1)}
+                                  className="text-gray-400 hover:text-white p-1 transition rounded hover:bg-slate-600"
+                                >
+                                  <Minus size={14} />
+                                </button>
+                                <span className="text-white font-bold w-6 text-center text-sm">{item.quantity}</span>
+                                <button
+                                  onClick={() => updateCartQuantity(item.cartId, item.quantity + 1)}
+                                  className="text-gray-400 hover:text-white p-1 transition rounded hover:bg-slate-600"
+                                >
+                                  <Plus size={14} />
+                                </button>
+                              </div>
+                              <p className="text-xs sm:text-sm font-bold text-blue-400">${(parseFloat(item.price || 0) * item.quantity).toFixed(2)}</p>
                             </div>
                           </div>
                         ))}
