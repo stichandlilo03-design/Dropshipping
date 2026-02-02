@@ -7,6 +7,8 @@ import { doc, getDoc, addDoc, collection, getDocs, updateDoc } from 'firebase/fi
 import { db } from '@/lib/firebase';
 import { ArrowLeft, Star, ShoppingCart, Heart, Copy, Check, Truck, Shield, RefreshCw, Mail, AlertCircle, Loader, X, Plus, Minus, TrendingUp, Eye, Zap, Lock, CreditCard, Trash2 } from 'lucide-react';
 
+const CART_STORAGE_KEY = 'dropship_cart';
+
 export default function ProductPage() {
   const params = useParams();
   const cartRef = useRef(null);
@@ -25,6 +27,7 @@ export default function ProductPage() {
   const [showCartDropdown, setShowCartDropdown] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [formErrors, setFormErrors] = useState({});
+  const [cartLoaded, setCartLoaded] = useState(false);
   
   const [formData, setFormData] = useState({
     email: '',
@@ -36,6 +39,40 @@ export default function ProductPage() {
     zipCode: '',
     country: 'United States',
   });
+
+  // Load cart from localStorage on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const savedCart = localStorage.getItem('shoppingCart');
+        if (savedCart) {
+          const parsedCart = JSON.parse(savedCart);
+          setCart(parsedCart);
+          console.log('[Cart] Loaded from localStorage:', parsedCart.length, 'items');
+        }
+      } catch (err) {
+        console.error('[Cart] Error loading from localStorage:', err);
+      }
+      setCartLoaded(true);
+    }
+  }, []);
+
+  // Save cart to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window !== 'undefined' && cartLoaded) {
+      try {
+        if (cart.length > 0) {
+          localStorage.setItem('shoppingCart', JSON.stringify(cart));
+          console.log('[Cart] Saved to localStorage:', cart.length, 'items');
+        } else {
+          localStorage.removeItem('shoppingCart');
+          console.log('[Cart] Cleared from localStorage');
+        }
+      } catch (err) {
+        console.error('[Cart] Error saving to localStorage:', err);
+      }
+    }
+  }, [cart, cartLoaded]);
 
   useEffect(() => {
     const handleClickOutside = (e) => {
@@ -172,6 +209,10 @@ export default function ProductPage() {
     );
   };
 
+  const clearCart = () => {
+    setCart([]);
+  };
+
   const cartTotal = cart.reduce((sum, item) => sum + (parseFloat(item.price || 0) * item.quantity), 0);
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   const shipping = 10.00;
@@ -256,6 +297,8 @@ export default function ProductPage() {
       const data = await response.json();
 
       if (data.success && data.checkoutUrl) {
+        // Clear cart after successful checkout initiation
+        clearCart();
         window.location.href = data.checkoutUrl;
       } else {
         setCheckoutError(data.error || 'Failed to create checkout session');
@@ -442,7 +485,7 @@ export default function ProductPage() {
                         onClick={() => setShowCartDropdown(false)}
                         className="w-full bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg transition text-sm"
                       >
-                        Continue
+                        Continue Shopping
                       </button>
                     </div>
                   )}
@@ -467,7 +510,7 @@ export default function ProductPage() {
         {showSuccess && (
           <div className="bg-green-900/30 border-b border-green-500 text-green-200 p-3 sm:p-4 flex items-center gap-3 sticky top-16 z-30">
             <Check size={20} />
-            <span className="text-sm">✅ Added to cart!</span>
+            <span className="text-sm">✅ Added to cart! You can keep shopping.</span>
           </div>
         )}
 
