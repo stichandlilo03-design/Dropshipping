@@ -4,18 +4,19 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DollarSign, ShoppingCart, Package, TrendingUp, Zap, Users, LogOut, Settings, Download, BookOpen, ArrowRight, Plus, Flame, AlertCircle, CheckCircle, Clock, Lock, ArrowLeft } from 'lucide-react';
+import { DollarSign, ShoppingCart, Package, TrendingUp, Zap, Users, LogOut, Settings, Download, BookOpen, ArrowRight, Plus, Flame, AlertCircle, CheckCircle, Clock, Lock, ArrowLeft, Eye, Trash2, Search } from 'lucide-react';
 import { auth } from '@/lib/firebase';
-import { signOut } from 'firebase/auth';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { signOut, onAuthStateChanged } from 'firebase/auth';
+import { collection, getDocs, query, where, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db as firebaseDb } from '@/lib/firebase';
 import { fetchTrendingProducts, addTrendingProductToStore } from '@/lib/trending';
 
-export default function Dashboard() {
+export default function AdminDashboard() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [orders, setOrders] = useState([]);
   const [products, setProducts] = useState([]);
+  const [customers, setCustomers] = useState([]);
   const [integrations, setIntegrations] = useState({});
   const [trendingProducts, setTrendingProducts] = useState([]);
   const [trendingLoading, setTrendingLoading] = useState(false);
@@ -31,15 +32,20 @@ export default function Dashboard() {
     totalCost: 0,
     totalOrders: 0,
     totalProducts: 0,
+    totalCustomers: 0,
     profitMargin: 0,
     avgOrderValue: 0,
     trendingAdded: 0,
   });
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [showOrderModal, setShowOrderModal] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterStatus, setFilterStatus] = useState('all');
 
   useEffect(() => {
-    const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) {
-        router.push('/auth/login');
+        router.push('/admin/login');
         return;
       }
 
@@ -59,49 +65,47 @@ export default function Dashboard() {
         return;
       }
 
-      console.log('[Dashboard] Loading data for userId:', userId);
+      console.log('[AdminDashboard] Loading data for userId:', userId);
 
-      // STEP 1: Load orders FIRST
+      // STEP 1: Load orders FIRST (ALL orders for admin)
       let loadedOrders = [];
       try {
-        console.log('[Dashboard] Fetching all orders from /orders collection');
+        console.log('[AdminDashboard] Fetching all orders from /orders collection');
         const ordersRef = collection(firebaseDb, 'orders');
         const ordersSnap = await getDocs(ordersRef);
         loadedOrders = ordersSnap.docs.map(doc => ({
           id: doc.id,
           ...doc.data(),
         }));
-        console.log('[Dashboard] Orders loaded:', loadedOrders.length);
+        console.log('[AdminDashboard] Orders loaded:', loadedOrders.length);
         setOrders(loadedOrders);
       } catch (ordersError) {
-        console.error('[Dashboard] Error loading orders:', ordersError);
+        console.error('[AdminDashboard] Error loading orders:', ordersError);
         loadedOrders = [];
         setOrders([]);
       }
 
-      // STEP 2: Load products
+      // STEP 2: Load products (ALL products for admin)
       let loadedProducts = [];
       try {
-        const productsQuery = query(
-          collection(firebaseDb, 'products'),
-          where('userId', '==', userId)
-        );
-        const productsSnap = await getDocs(productsQuery);
+        console.log('[AdminDashboard] Fetching all products');
+        const productsRef = collection(firebaseDb, 'products');
+        const productsSnap = await getDocs(productsRef);
         loadedProducts = productsSnap.docs.map(doc => ({
           id: doc.id,
           ...doc.data(),
         }));
-        console.log('[Dashboard] Products loaded:', loadedProducts.length);
+        console.log('[AdminDashboard] Products loaded:', loadedProducts.length);
         setProducts(loadedProducts);
 
         // Count products added from trending
         const trendingCount = loadedProducts.filter(p => p.trendingSource).length;
-        console.log('[Dashboard] Products from trending:', trendingCount);
+        console.log('[AdminDashboard] Products from trending:', trendingCount);
 
         // Calculate stats with loaded orders and products
         calculateStats(loadedOrders, loadedProducts, trendingCount);
       } catch (productsError) {
-        console.error('[Dashboard] Error loading products:', productsError);
+        console.error('[AdminDashboard] Error loading products:', productsError);
         loadedProducts = [];
         setProducts([]);
         
@@ -109,7 +113,23 @@ export default function Dashboard() {
         calculateStats(loadedOrders, [], 0);
       }
 
-      // STEP 3: Load integrations
+      // STEP 3: Load customers (ALL customers for admin)
+      try {
+        console.log('[AdminDashboard] Fetching all customers');
+        const customersRef = collection(firebaseDb, 'customers');
+        const customersSnap = await getDocs(customersRef);
+        const loadedCustomers = customersSnap.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        console.log('[AdminDashboard] Customers loaded:', loadedCustomers.length);
+        setCustomers(loadedCustomers);
+      } catch (customersError) {
+        console.error('[AdminDashboard] Error loading customers:', customersError);
+        setCustomers([]);
+      }
+
+      // STEP 4: Load integrations
       try {
         const integrationsData = {};
         const integrationsQuery = query(
@@ -119,21 +139,21 @@ export default function Dashboard() {
         integrationsSnap.forEach(doc => {
           integrationsData[doc.id] = doc.data();
         });
-        console.log('[Dashboard] Integrations loaded:', Object.keys(integrationsData).length);
+        console.log('[AdminDashboard] Integrations loaded:', Object.keys(integrationsData).length);
         setIntegrations(integrationsData);
 
         // Calculate feature availability
         calculateFeatureStatus(integrationsData);
       } catch (integrationsError) {
-        console.error('[Dashboard] Error loading integrations:', integrationsError);
+        console.error('[AdminDashboard] Error loading integrations:', integrationsError);
         setIntegrations({});
         setFeatureStatus({});
       }
 
-      // STEP 4: Load trending products
+      // STEP 5: Load trending products
       await loadTrendingProducts(userId);
     } catch (error) {
-      console.error('[Dashboard] Error loading data:', error);
+      console.error('[AdminDashboard] Error loading data:', error);
     } finally {
       setLoading(false);
     }
@@ -141,24 +161,24 @@ export default function Dashboard() {
 
   const loadTrendingProducts = async (userId) => {
     try {
-      console.log('[Dashboard] 📥 Fetching trending products...');
+      console.log('[AdminDashboard] 📥 Fetching trending products...');
       setTrendingLoading(true);
       setTrendingError(null);
       
       const result = await fetchTrendingProducts(userId);
       
       if (result.success) {
-        console.log('[Dashboard] ✅ Got trending products:', result.products.length);
+        console.log('[AdminDashboard] ✅ Got trending products:', result.products.length);
         setTrendingProducts(result.products);
         setTrendingStats(result.stats || {});
       } else {
-        console.error('[Dashboard] ❌ Error:', result.error);
+        console.error('[AdminDashboard] ❌ Error:', result.error);
         setTrendingError(result.error);
         setTrendingProducts([]);
         setTrendingStats({});
       }
     } catch (error) {
-      console.error('[Dashboard] ❌ Error loading trending:', error);
+      console.error('[AdminDashboard] ❌ Error loading trending:', error);
       setTrendingError(error.message);
       setTrendingProducts([]);
     } finally {
@@ -191,6 +211,38 @@ export default function Dashboard() {
     }
   };
 
+  const handleUpdateOrderStatus = async (orderId, newStatus) => {
+    try {
+      await updateDoc(doc(firebaseDb, 'orders', orderId), {
+        status: newStatus,
+        updatedAt: new Date().toISOString(),
+      });
+      
+      await loadData(user.uid);
+      setShowOrderModal(false);
+      setAddMessage({ type: 'success', text: 'Order status updated!' });
+      setTimeout(() => setAddMessage(null), 2000);
+    } catch (error) {
+      console.error('Error updating order:', error);
+      setAddMessage({ type: 'error', text: 'Failed to update order' });
+    }
+  };
+
+  const handleDeleteOrder = async (orderId) => {
+    if (!confirm('Are you sure you want to delete this order?')) return;
+
+    try {
+      await deleteDoc(doc(firebaseDb, 'orders', orderId));
+      await loadData(user.uid);
+      setShowOrderModal(false);
+      setAddMessage({ type: 'success', text: 'Order deleted!' });
+      setTimeout(() => setAddMessage(null), 2000);
+    } catch (error) {
+      console.error('Error deleting order:', error);
+      setAddMessage({ type: 'error', text: 'Failed to delete order' });
+    }
+  };
+
   const calculateFeatureStatus = (integrationsData) => {
     const connected = {};
     Object.keys(integrationsData).forEach(key => {
@@ -199,7 +251,7 @@ export default function Dashboard() {
       }
     });
 
-    console.log('[Dashboard] Connected APIs:', Object.keys(connected));
+    console.log('[AdminDashboard] Connected APIs:', Object.keys(connected));
 
     const features = {
       trendingProducts: {
@@ -225,7 +277,7 @@ export default function Dashboard() {
 
   const calculateStats = (ordersData = [], productsData = [], trendingAdded = 0) => {
     try {
-      console.log('[Dashboard] Calculating stats with orders:', ordersData.length, 'products:', productsData.length);
+      console.log('[AdminDashboard] Calculating stats with orders:', ordersData.length, 'products:', productsData.length);
       
       const totalRevenue = ordersData.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0);
       const totalCost = ordersData.reduce((sum, order) => sum + (parseFloat(order.shipping) || 0), 0);
@@ -233,7 +285,7 @@ export default function Dashboard() {
       const profitMargin = totalRevenue > 0 ? Math.round((totalProfit / totalRevenue) * 100) : 0;
       const avgOrderValue = ordersData.length > 0 ? (totalRevenue / ordersData.length).toFixed(2) : 0;
 
-      console.log('[Dashboard] Stats calculated - Revenue:', totalRevenue, 'Orders:', ordersData.length, 'Profit:', totalProfit);
+      console.log('[AdminDashboard] Stats calculated - Revenue:', totalRevenue, 'Orders:', ordersData.length, 'Profit:', totalProfit);
 
       setStats({
         totalRevenue: totalRevenue.toFixed(2),
@@ -241,19 +293,20 @@ export default function Dashboard() {
         totalCost: totalCost.toFixed(2),
         totalOrders: ordersData.length,
         totalProducts: productsData.length,
+        totalCustomers: customers.length,
         profitMargin,
         avgOrderValue,
         trendingAdded,
       });
     } catch (error) {
-      console.error('[Dashboard] Error calculating stats:', error);
+      console.error('[AdminDashboard] Error calculating stats:', error);
     }
   };
 
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      router.push('/auth/login');
+      router.push('/');
     } catch (error) {
       console.error('Error logging out:', error);
     }
@@ -270,6 +323,7 @@ export default function Dashboard() {
         stats,
         orders,
         products,
+        customers,
         integrations: Object.keys(integrations),
       };
 
@@ -278,7 +332,7 @@ export default function Dashboard() {
       const url = URL.createObjectURL(dataBlob);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `dropboard_backup_${Date.now()}.json`;
+      link.download = `dropboard_admin_backup_${Date.now()}.json`;
       link.click();
       URL.revokeObjectURL(url);
     }
@@ -297,15 +351,15 @@ export default function Dashboard() {
     }
 
     if (totalOrders === 0 && trendingAdded === 0) {
-      return `${timeGreeting}! Start by discovering trending products or connecting integrations.`;
+      return `${timeGreeting}! Start by reviewing the platform or connecting integrations.`;
     } else if (trendingAdded > 0 && totalOrders === 0) {
-      return `${timeGreeting}! You've added ${trendingAdded} products. Now let's get them some sales! 🚀`;
+      return `${timeGreeting}! ${trendingAdded} products added. Waiting for sales! 🚀`;
     } else if (totalOrders < 10) {
-      return `${timeGreeting}! You're building momentum with ${totalOrders} orders from ${trendingAdded} trending products. Keep it up! 🚀`;
+      return `${timeGreeting}! Platform has ${totalOrders} orders from ${trendingAdded} trending products. Keep it up! 🚀`;
     } else if (totalOrders < 50) {
-      return `${timeGreeting}! Great work! ${totalOrders} orders from ${trendingAdded} products. You're on the right track! 💪`;
+      return `${timeGreeting}! Great work! ${totalOrders} orders from ${trendingAdded} products. Growing! 💪`;
     } else {
-      return `${timeGreeting}! Amazing! ${totalOrders} orders and counting. Your store is thriving! 🌟`;
+      return `${timeGreeting}! Amazing! ${totalOrders} orders and counting. Platform is thriving! 🌟`;
     }
   };
 
@@ -346,6 +400,15 @@ export default function Dashboard() {
     return Object.values(data);
   };
 
+  const filteredOrders = orders.filter((order) => {
+    const matchesSearch = order.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         order.customerEmail?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         order.productName?.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesFilter = filterStatus === 'all' || order.status === filterStatus;
+    return matchesSearch && matchesFilter;
+  });
+
   const chartData = generateChartData();
   const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
 
@@ -354,7 +417,7 @@ export default function Dashboard() {
       <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-gray-400">Loading dashboard...</p>
+          <p className="text-gray-400">Loading admin dashboard...</p>
         </div>
       </div>
     );
@@ -365,8 +428,8 @@ export default function Dashboard() {
       <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
         <div className="text-center">
           <p className="text-gray-400 mb-4">You need to be logged in</p>
-          <Link href="/auth/login" className="text-blue-400 hover:underline">
-            Go to Login
+          <Link href="/admin/login" className="text-blue-400 hover:underline">
+            Go to Admin Login
           </Link>
         </div>
       </div>
@@ -379,8 +442,8 @@ export default function Dashboard() {
       <div className="sticky top-0 z-40 bg-slate-800/50 backdrop-blur border-b border-slate-700">
         <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-white">📊 DropBoard</h1>
-            <p className="text-xs text-gray-400">Dropshipping Automation Platform</p>
+            <h1 className="text-2xl font-bold text-white">📊 DropBoard Admin</h1>
+            <p className="text-xs text-gray-400">Platform Management Dashboard</p>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -418,12 +481,12 @@ export default function Dashboard() {
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
         {/* Welcome Section */}
         <div className="space-y-2 mb-8">
-          <h2 className="text-5xl font-bold text-white">Welcome back! 👋</h2>
+          <h2 className="text-5xl font-bold text-white">Welcome back, Admin! 👋</h2>
           <p className="text-lg text-gray-400">
             {getWelcomeMessage(stats.totalOrders, stats.trendingAdded)}
           </p>
           <div className="flex items-center gap-2 text-sm text-gray-500 mt-4">
-            <span>📧 {user.email || 'User'}</span>
+            <span>📧 {user.email || 'Admin'}</span>
             <span className="text-gray-700">•</span>
             <span>ID: {user.uid?.substring(0, 8)}...</span>
           </div>
@@ -499,15 +562,15 @@ export default function Dashboard() {
           </div>
 
           <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
-            <p className="text-gray-400 text-xs">Integrations</p>
-            <p className="text-2xl font-bold text-pink-400">{intStatus.total}</p>
-            <p className="text-xs text-gray-500 mt-1">Connected</p>
+            <p className="text-gray-400 text-xs">Customers</p>
+            <p className="text-2xl font-bold text-pink-400">{stats.totalCustomers}</p>
+            <p className="text-xs text-gray-500 mt-1">Active</p>
           </div>
 
           <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
-            <p className="text-gray-400 text-xs">Trending</p>
-            <p className="text-2xl font-bold text-orange-400">{trendingProducts.length}</p>
-            <p className="text-xs text-gray-500 mt-1">Available</p>
+            <p className="text-gray-400 text-xs">Integrations</p>
+            <p className="text-2xl font-bold text-pink-400">{intStatus.total}</p>
+            <p className="text-xs text-gray-500 mt-1">Connected</p>
           </div>
         </div>
 
@@ -619,6 +682,170 @@ export default function Dashboard() {
             </div>
           </div>
         )}
+
+        {/* Orders Section */}
+        <div>
+          <div className="flex items-center justify-between mb-6">
+            <h3 className="text-2xl font-bold text-white">All Orders</h3>
+            <span className="text-sm text-gray-400">{filteredOrders.length} orders</span>
+          </div>
+
+          {/* Search & Filter */}
+          <div className="flex flex-col md:flex-row gap-4 mb-4">
+            <div className="flex-1 relative">
+              <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" />
+              <input
+                type="text"
+                placeholder="Search orders..."
+                className="w-full px-4 py-2 pl-10 bg-slate-800 text-white border border-slate-700 rounded-lg focus:outline-none focus:border-blue-500"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
+            <select
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value)}
+              className="px-4 py-2 bg-slate-800 text-white border border-slate-700 rounded-lg focus:outline-none focus:border-blue-500"
+            >
+              <option value="all">All Status</option>
+              <option value="pending_payment">Pending Payment</option>
+              <option value="paid">Paid</option>
+              <option value="processing">Processing</option>
+              <option value="shipped">Shipped</option>
+              <option value="completed">Completed</option>
+            </select>
+          </div>
+
+          {/* Orders Table */}
+          <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-700 bg-slate-900/50">
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Customer</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Product</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Email</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Total</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Status</th>
+                    <th className="px-6 py-3 text-right text-sm font-semibold text-gray-400">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredOrders.length > 0 ? (
+                    filteredOrders.map((order) => (
+                      <tr key={order.id} className="border-b border-slate-700 hover:bg-slate-700/50 transition">
+                        <td className="px-6 py-4 text-sm font-semibold text-white">{order.customerName}</td>
+                        <td className="px-6 py-4 text-sm text-gray-300">{order.productName}</td>
+                        <td className="px-6 py-4 text-sm text-gray-300">{order.customerEmail}</td>
+                        <td className="px-6 py-4 text-sm font-semibold text-green-400">${order.total?.toFixed(2)}</td>
+                        <td className="px-6 py-4">
+                          <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${
+                            order.status === 'completed' || order.status === 'paid'
+                              ? 'bg-green-500/10 text-green-400'
+                              : order.status === 'processing'
+                              ? 'bg-yellow-500/10 text-yellow-400'
+                              : order.status === 'shipped'
+                              ? 'bg-blue-500/10 text-blue-400'
+                              : 'bg-orange-500/10 text-orange-400'
+                          }`}>
+                            {order.status === 'pending_payment' ? 'Pending' : order.status?.charAt(0).toUpperCase() + order.status?.slice(1)}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <button
+                            onClick={() => {
+                              setSelectedOrder(order);
+                              setShowOrderModal(true);
+                            }}
+                            className="p-2 hover:bg-slate-600 rounded transition"
+                          >
+                            <Eye size={16} className="text-gray-400" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan="6" className="px-6 py-8 text-center text-gray-400">
+                        No orders found
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* Customers Section */}
+        <div>
+          <h3 className="text-2xl font-bold text-white mb-6">Customers</h3>
+          <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full">
+                <thead>
+                  <tr className="border-b border-slate-700 bg-slate-900/50">
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Name</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Email</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Phone</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Total Spent</th>
+                    <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Orders</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {customers.length > 0 ? (
+                    customers.map((customer) => (
+                      <tr key={customer.id} className="border-b border-slate-700 hover:bg-slate-700/50 transition">
+                        <td className="px-6 py-4 text-sm font-semibold text-white">{customer.firstName} {customer.lastName}</td>
+                        <td className="px-6 py-4 text-sm text-gray-300">{customer.email}</td>
+                        <td className="px-6 py-4 text-sm text-gray-300">{customer.phone || 'N/A'}</td>
+                        <td className="px-6 py-4 text-sm font-semibold text-green-400">${customer.total_spent?.toFixed(2) || '0.00'}</td>
+                        <td className="px-6 py-4 text-sm text-blue-400">{customer.order_count || 0}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan="5" className="px-6 py-8 text-center text-gray-400">
+                        No customers yet
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* Products Section */}
+        <div>
+          <h3 className="text-2xl font-bold text-white mb-6">All Products</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {products.length > 0 ? (
+              products.map((product) => (
+                <div key={product.id} className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden hover:border-blue-500 transition">
+                  {product.image && (
+                    <div className="h-40 overflow-hidden bg-slate-700">
+                      <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+                    </div>
+                  )}
+                  <div className="p-4">
+                    <h4 className="font-semibold text-white line-clamp-2 mb-2">{product.name}</h4>
+                    <p className="text-lg font-bold text-green-400 mb-3">${parseFloat(product.price || 0).toFixed(2)}</p>
+                    <p className="text-xs text-gray-400 mb-2">Category: {product.category || 'N/A'}</p>
+                    {product.trendingSource && (
+                      <p className="text-xs text-orange-400 mb-2">📊 From: {product.trendingSource}</p>
+                    )}
+                    <p className="text-xs text-gray-500">Stock: {product.inventory || 0}</p>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="col-span-3 text-center py-8 text-gray-400">
+                No products yet
+              </div>
+            )}
+          </div>
+        </div>
 
         {/* Integration Status */}
         <div>
@@ -747,26 +974,86 @@ export default function Dashboard() {
             </Link>
           </div>
         </div>
+      </div>
 
-        {/* Empty State */}
-        {stats.totalProducts === 0 && trendingProducts.length === 0 && intStatus.total === 0 && (
-          <div className="bg-slate-800 border border-slate-700 rounded-lg p-12 text-center">
-            <Package size={48} className="mx-auto text-gray-600 mb-4" />
-            <h3 className="text-xl font-bold text-white mb-2">Welcome to DropBoard!</h3>
-            <p className="text-gray-400 mb-6">Let's get you set up and ready to start your dropshipping business</p>
-            <div className="flex gap-4 justify-center flex-wrap">
-              <Link href="/integrations" className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium transition inline-flex items-center gap-2">
-                <Zap size={16} />
-                Connect First Integration
-              </Link>
-              <Link href="/help" className="bg-slate-700 hover:bg-slate-600 text-white px-6 py-2 rounded-lg font-medium transition inline-flex items-center gap-2">
-                <BookOpen size={16} />
-                View Setup Guide
-              </Link>
+      {/* Order Modal */}
+      {showOrderModal && selectedOrder && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 rounded-lg max-w-2xl w-full border border-slate-700 p-8 max-h-96 overflow-y-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-white">Order Details</h2>
+              <button onClick={() => setShowOrderModal(false)} className="text-gray-400 hover:text-white text-2xl">×</button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-gray-400 text-sm">Customer</p>
+                  <p className="text-white font-semibold">{selectedOrder.customerName}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 text-sm">Email</p>
+                  <p className="text-white font-semibold">{selectedOrder.customerEmail}</p>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-gray-400 text-sm">Product</p>
+                <p className="text-white font-semibold">{selectedOrder.productName}</p>
+              </div>
+
+              <div className="border-t border-slate-700 pt-4">
+                <p className="text-gray-400 text-sm mb-3">Financial Details</p>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-gray-400 text-xs">Subtotal</p>
+                    <p className="text-blue-400 text-lg font-bold">${selectedOrder.subtotal?.toFixed(2)}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400 text-xs">Tax</p>
+                    <p className="text-yellow-400 text-lg font-bold">${selectedOrder.tax?.toFixed(2)}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400 text-xs">Total</p>
+                    <p className="text-green-400 text-lg font-bold">${selectedOrder.total?.toFixed(2)}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-700 pt-4">
+                <p className="text-gray-400 text-sm mb-3">Update Status</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {['pending_payment', 'paid', 'processing', 'shipped', 'completed'].map(status => (
+                    <button
+                      key={status}
+                      onClick={() => handleUpdateOrderStatus(selectedOrder.id, status)}
+                      className={`py-2 px-3 rounded text-sm font-semibold transition ${
+                        selectedOrder.status === status
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+                      }`}
+                    >
+                      {status === 'pending_payment' ? 'Pending' : status.charAt(0).toUpperCase() + status.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-4 border-t border-slate-700">
+                <button onClick={() => setShowOrderModal(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg font-semibold transition">
+                  Close
+                </button>
+                <button
+                  onClick={() => handleDeleteOrder(selectedOrder.id)}
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg font-semibold transition"
+                >
+                  Delete
+                </button>
+              </div>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
