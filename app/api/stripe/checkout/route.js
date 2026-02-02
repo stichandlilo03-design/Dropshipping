@@ -1,213 +1,139 @@
-import { NextResponse } from 'next/server';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, getDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, query, where } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import Stripe from 'stripe';
 
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 export async function POST(request) {
   try {
     const body = await request.json();
-    
-    const {
-      orderId,
-      productId,
-      productName,
-      productPrice,
-      quantity,
-      customerEmail,
-      customerName,
-      shippingCost,
-      tax,
-    } = body;
+    const { cartItems, customer, subtotal, tax, total, shippingAddress } = body;
 
-    console.log('[Stripe Checkout] Creating checkout for order:', orderId);
-    console.log('[Stripe Checkout] Product ID:', productId);
+    console.log('[Checkout API] Request received');
+    console.log('[Checkout API] Items:', cartItems?.length);
+    console.log('[Checkout API] Customer:', customer?.email);
+    console.log('[Checkout API] Total:', total);
 
-    // STEP 1: Get product from Firestore to find owner
-    console.log('[Stripe Checkout] Fetching product details...');
-    const productRef = doc(db, 'products', productId);
-    const productSnap = await getDoc(productRef);
-
-    if (!productSnap.exists()) {
-      console.error('[Stripe Checkout] Product not found:', productId);
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Product not found',
-        },
-        { status: 404 }
-      );
-    }
-
-    const productData = productSnap.data();
-    const adminUserId = productData.userId;
-
-    console.log('[Stripe Checkout] Product owner ID:', adminUserId);
-
-    // STEP 2: Get admin's Stripe integration from their settings
-    console.log('[Stripe Checkout] Fetching admin Stripe integration...');
-    
-    // The integrations are stored at: /users/{userId}/integrations/stripe
-    const stripeIntegrationRef = doc(db, `users/${adminUserId}/integrations/stripe`);
-    const stripeIntegrationSnap = await getDoc(stripeIntegrationRef);
-
-    if (!stripeIntegrationSnap.exists()) {
-      console.error('[Stripe Checkout] Admin has no Stripe integration:', adminUserId);
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Product owner has not configured Stripe payment processing. Please contact the store.',
-        },
+    if (!cartItems || cartItems.length === 0) {
+      return Response.json(
+        { success: false, error: 'Cart is empty' },
         { status: 400 }
       );
     }
 
-    const integrationData = stripeIntegrationSnap.data();
-    console.log('[Stripe Checkout] Integration data found:', integrationData.integrationId);
-
-    // STEP 3: Extract Stripe credentials
-    // The credentials are nested under: integrationData.credentials.secretKey
-    let stripeSecretKey = null;
-
-    // Try credentials.secretKey first (new format)
-    if (integrationData.credentials && integrationData.credentials.secretKey) {
-      stripeSecretKey = integrationData.credentials.secretKey;
-      console.log('[Stripe Checkout] Found secretKey in credentials.secretKey');
-    }
-    // Try direct secretKey (old format)
-    else if (integrationData.secretKey) {
-      stripeSecretKey = integrationData.secretKey;
-      console.log('[Stripe Checkout] Found secretKey directly on integration');
-    }
-
-    if (!stripeSecretKey) {
-      console.error('[Stripe Checkout] No Stripe secret key found in integration data');
-      console.log('[Stripe Checkout] Integration structure:', Object.keys(integrationData));
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Stripe integration incomplete. Secret key not found.',
-        },
+    if (!customer || !customer.email) {
+      return Response.json(
+        { success: false, error: 'Customer email required' },
         { status: 400 }
       );
     }
 
-    console.log('[Stripe Checkout] ✅ Retrieved Stripe secret key');
+    if (!total) {
+      return Response.json(
+        { success: false, error: 'Total amount required' },
+        { status: 400 }
+      );
+    }
 
-    // STEP 4: Initialize Stripe
-    const Stripe = require('stripe');
-    const stripe = new Stripe(stripeSecretKey);
-    console.log('[Stripe Checkout] Stripe initialized');
-
-    // STEP 5: Calculate totals in cents
-    const unitPriceInCents = Math.round(parseFloat(productPrice) * 100);
-    const subtotalInCents = unitPriceInCents * quantity;
-    const shippingInCents = Math.round(parseFloat(shippingCost) * 100);
-    const taxInCents = Math.round(parseFloat(tax) * 100);
-    const totalInCents = subtotalInCents + shippingInCents + taxInCents;
-
-    console.log('[Stripe Checkout] Totals:', {
-      unitPrice: unitPriceInCents,
-      subtotal: subtotalInCents,
-      shipping: shippingInCents,
-      tax: taxInCents,
-      total: totalInCents,
-    });
-
-    // STEP 6: Get base URL
-    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || 
-                    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
-
-    console.log('[Stripe Checkout] Base URL:', baseUrl);
-
-    // STEP 7: Create Stripe checkout session
-    console.log('[Stripe Checkout] Creating Stripe session...');
-    
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card'],
-      customer_email: customerEmail,
-      
-      line_items: [
-        {
-          price_data: {
-            currency: 'usd',
-            product_data: {
-              name: productName,
-              description: `Quantity: ${quantity}`,
-              metadata: {
-                orderId: orderId,
-                productId: productId,
-              },
-            },
-            unit_amount: unitPriceInCents,
+    try {
+      // Create line items for Stripe
+      const lineItems = cartItems.map(item => ({
+        price_data: {
+          currency: 'usd',
+          product_data: {
+            name: item.name || item.productName || 'Product',
+            description: item.description || '',
+            images: item.image ? [item.image] : [],
           },
-          quantity: quantity,
+          unit_amount: Math.round((parseFloat(item.price) || 0) * 100), // Convert to cents
         },
-        {
-          price_data: {
-            currency: 'usd',
-            product_data: {
-              name: 'Shipping',
-            },
-            unit_amount: shippingInCents,
-          },
-          quantity: 1,
+        quantity: item.quantity || 1,
+      }));
+
+      console.log('[Checkout API] Line items:', lineItems.length);
+
+      // Create Stripe session
+      const session = await stripe.checkout.sessions.create({
+        payment_method_types: ['card'],
+        line_items: lineItems,
+        mode: 'payment',
+        success_url: `${process.env.NEXT_PUBLIC_DOMAIN || 'https://www.dropshipwithmonk.sbs'}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${process.env.NEXT_PUBLIC_DOMAIN || 'https://www.dropshipwithmonk.sbs'}/checkout/cancel`,
+        customer_email: customer.email,
+        metadata: {
+          customerId: customer.id || 'unknown',
+          customerName: customer.firstName || 'Customer',
+          customerEmail: customer.email,
         },
-        {
-          price_data: {
-            currency: 'usd',
-            product_data: {
-              name: 'Tax',
-            },
-            unit_amount: taxInCents,
-          },
-          quantity: 1,
-        },
-      ],
-      
-      mode: 'payment',
-      success_url: `${baseUrl}/success?order=${orderId}`,
-      cancel_url: `${baseUrl}/cancelled`,
-      
-      metadata: {
-        orderId: orderId,
-        productId: productId,
-        adminId: adminUserId,
-        customerName: customerName,
-        customerEmail: customerEmail,
-      },
-    });
+      });
 
-    console.log('[Stripe Checkout] ✅ Session created:', session.id);
-    console.log('[Stripe Checkout] Checkout URL:', session.url);
+      console.log('[Checkout API] Stripe session created:', session.id);
 
-    return NextResponse.json({
-      success: true,
-      checkoutUrl: session.url,
-      sessionId: session.id,
-      adminId: adminUserId,
-    });
+      // Save order to Firestore before payment
+      // This way we have a record even if payment fails
+      try {
+        const orderData = {
+          id: session.id,
+          stripeSessionId: session.id,
+          customerId: customer.id,
+          customerName: customer.firstName || 'Customer',
+          customerEmail: customer.email,
+          customerPhone: customer.phone || '',
+          items: cartItems.map(item => ({
+            productId: item.id,
+            productName: item.name || item.productName,
+            price: parseFloat(item.price),
+            quantity: item.quantity || 1,
+            image: item.image,
+          })),
+          subtotal: parseFloat(subtotal || 0),
+          tax: parseFloat(tax || 0),
+          total: parseFloat(total),
+          shippingAddress: shippingAddress || {},
+          status: 'pending_payment', // Not yet paid
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
 
+        console.log('[Checkout API] Saving order to Firestore...');
+
+        // Try to save to Firestore, but don't fail if it doesn't work
+        try {
+          const ordersRef = collection(db, 'orders');
+          const docRef = await addDoc(ordersRef, orderData);
+          console.log('[Checkout API] Order saved:', docRef.id);
+        } catch (firestoreError) {
+          console.error('[Checkout API] Firestore save error (non-fatal):', firestoreError.message);
+          // Don't fail checkout if Firestore save fails
+          // Stripe session is created, that's what matters
+        }
+      } catch (orderError) {
+        console.error('[Checkout API] Order creation error:', orderError);
+        // Don't fail - Stripe session is already created
+      }
+
+      // Return Stripe session
+      return Response.json({
+        success: true,
+        sessionId: session.id,
+        clientSecret: session.client_secret,
+        message: 'Checkout session created successfully',
+      });
+    } catch (stripeError) {
+      console.error('[Checkout API] Stripe error:', stripeError);
+      return Response.json(
+        { success: false, error: stripeError.message || 'Stripe error' },
+        { status: 500 }
+      );
+    }
   } catch (error) {
-    console.error('[Stripe Checkout] Error:', error.message);
-    console.error('[Stripe Checkout] Stack:', error.stack);
-    
-    return NextResponse.json(
-      {
-        success: false,
-        error: error.message || 'Failed to create checkout session',
-      },
+    console.error('[Checkout API] Error:', error);
+    return Response.json(
+      { success: false, error: error.message || 'Checkout failed' },
       { status: 500 }
     );
   }
 }
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
