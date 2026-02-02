@@ -181,7 +181,7 @@ function OrderTrackingContent() {
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-4">
-              <Link href="/customer/dashboard" className="p-2 hover:bg-slate-700 rounded-lg transition">
+              <Link href="/customer/account" className="p-2 hover:bg-slate-700 rounded-lg transition">
                 <ArrowLeft size={20} className="text-gray-400" />
               </Link>
               <div>
@@ -442,7 +442,7 @@ function OrderTrackingContent() {
             <p className="text-gray-400 text-lg mb-4">
               {filterStatus === 'all' ? 'No orders found' : `No ${filterStatus} orders`}
             </p>
-            <Link href="/customer/dashboard" className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition">
+            <Link href="/customer/account" className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition">
               Back to Dashboard
             </Link>
           </div>
