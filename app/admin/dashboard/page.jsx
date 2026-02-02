@@ -1,338 +1,394 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { User, Mail, Phone, MapPin, LogOut, Edit2, Save, X, Heart, Package, Zap, Settings, AlertCircle, Loader, CheckCircle, Eye, ShoppingCart, Trash2, Search, Filter, Download, Truck, Clock, Star } from 'lucide-react';
+import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { DollarSign, ShoppingCart, Package, TrendingUp, Zap, Users, LogOut, Settings, Download, BookOpen, ArrowRight, Plus, Flame, AlertCircle, CheckCircle, Clock, Lock, ArrowLeft, Eye, Trash2, Search } from 'lucide-react';
+import { auth } from '@/lib/firebase';
+import { signOut, onAuthStateChanged } from 'firebase/auth';
+import { collection, getDocs, query, where, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { db as firebaseDb } from '@/lib/firebase';
+import { fetchTrendingProducts, addTrendingProductToStore } from '@/lib/trending';
 
-export default function CustomerAccount() {
+export default function AdminDashboard() {
   const router = useRouter();
-  const [customer, setCustomer] = useState(null);
+  const [user, setUser] = useState(null);
   const [orders, setOrders] = useState([]);
-  const [wishlist, setWishlist] = useState([]);
-  const [products, setProducts] = useState({});
+  const [products, setProducts] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [integrations, setIntegrations] = useState({});
+  const [trendingProducts, setTrendingProducts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const [activeTab, setActiveTab] = useState('profile');
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [sortBy, setSortBy] = useState('newest');
+  const [activeTab, setActiveTab] = useState('overview');
   const [searchTerm, setSearchTerm] = useState('');
-  const [filteredOrders, setFilteredOrders] = useState([]);
-  const [filteredWishlist, setFilteredWishlist] = useState([]);
-  
-  const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
-    phone: '',
-    address: {
-      street: '',
-      city: '',
-      state: '',
-      zip: '',
-      country: 'United States'
-    }
+  const [filterStatus, setFilterStatus] = useState('all');
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [showOrderModal, setShowOrderModal] = useState(false);
+  const [trendingLoading, setTrendingLoading] = useState(false);
+  const [trendingError, setTrendingError] = useState(null);
+  const [addingProduct, setAddingProduct] = useState(null);
+  const [addMessage, setAddMessage] = useState(null);
+  const [trendingStats, setTrendingStats] = useState({ shopify: 0, printful_custom: 0, printful_bestseller: 0 });
+  const [featureStatus, setFeatureStatus] = useState({});
+  const [stats, setStats] = useState({
+    totalRevenue: 0,
+    totalProfit: 0,
+    totalCost: 0,
+    totalOrders: 0,
+    totalProducts: 0,
+    totalCustomers: 0,
+    profitMargin: 0,
+    avgOrderValue: 0,
+    trendingAdded: 0,
   });
 
-  // Load Customer Data
   useEffect(() => {
-    const loadCustomer = async () => {
-      try {
-        setLoading(true);
-        
-        const storedCustomer = localStorage.getItem('customer');
-        const token = localStorage.getItem('customerToken');
-
-        if (!storedCustomer || !token) {
-          router.push('/customer/login');
-          return;
-        }
-
-        const customerData = JSON.parse(storedCustomer);
-        setCustomer(customerData);
-        
-        setFormData(prev => ({
-          ...prev,
-          firstName: customerData.firstName || '',
-          lastName: customerData.lastName || '',
-          phone: customerData.phone || '',
-        }));
-
-        // Load orders
-        await loadOrders(customerData.id, token);
-        
-        // Load wishlist
-        await loadWishlist(token);
-
-      } catch (err) {
-        console.error('[Account] Error:', err);
-        router.push('/customer/login');
-      } finally {
-        setLoading(false);
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (!currentUser) {
+        router.push('/admin/login');
+        return;
       }
-    };
 
-    loadCustomer();
+      console.log('[Admin Dashboard] User authenticated:', currentUser.uid);
+      setUser(currentUser);
+      await loadAllData(currentUser.uid);
+    });
+
+    return () => unsubscribe();
   }, [router]);
 
-  const loadOrders = async (customerId, token) => {
+  const loadAllData = async (userId) => {
     try {
-      const response = await fetch(`/api/orders/list?customerId=${customerId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      setLoading(true);
+      console.log('[Admin Dashboard] Loading all data...');
 
-      const data = await response.json();
-      if (data.success && data.orders) {
-        setOrders(data.orders);
-        applyOrderFilters(data.orders);
-      }
-    } catch (err) {
-      console.error('[Orders] Error:', err);
-    }
-  };
+      // Load orders
+      await loadOrders();
 
-  const loadWishlist = async (token) => {
-    try {
-      const response = await fetch('/api/customers/profile', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
+      // Load products
+      await loadProducts(userId);
 
-      const data = await response.json();
-      
-      if (data.success && data.customer.wishlist) {
-        setWishlist(data.customer.wishlist);
-        
-        const productsData = {};
-        for (const productId of data.customer.wishlist) {
-          try {
-            const productRes = await fetch(`/api/products/${productId}`);
-            if (productRes.ok) {
-              const productData = await productRes.json();
-              productsData[productId] = productData;
-            }
-          } catch (err) {
-            console.error('Error fetching product:', err);
-          }
-        }
-        setProducts(productsData);
-        applyWishlistFilters(data.customer.wishlist, productsData);
-      }
-    } catch (err) {
-      console.error('[Wishlist] Error:', err);
-    }
-  };
+      // Load customers
+      await loadCustomers();
 
-  const applyOrderFilters = (ordersToFilter) => {
-    let filtered = ordersToFilter;
+      // Load integrations
+      await loadIntegrations(userId);
 
-    if (statusFilter !== 'all') {
-      filtered = filtered.filter(order => order.status === statusFilter);
-    }
-
-    if (searchTerm) {
-      filtered = filtered.filter(order => 
-        order.id?.includes(searchTerm) || 
-        order.status?.includes(searchTerm)
-      );
-    }
-
-    if (sortBy === 'newest') {
-      filtered.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-    } else if (sortBy === 'oldest') {
-      filtered.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-    } else if (sortBy === 'highest') {
-      filtered.sort((a, b) => b.total - a.total);
-    }
-
-    setFilteredOrders(filtered);
-  };
-
-  const applyWishlistFilters = (wishlistToFilter, productsData) => {
-    const filtered = wishlistToFilter.filter(id => {
-      const product = productsData[id];
-      if (!product) return false;
-      return product.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-             product.category?.toLowerCase().includes(searchTerm.toLowerCase());
-    });
-    setFilteredWishlist(filtered);
-  };
-
-  useEffect(() => {
-    applyOrderFilters(orders);
-  }, [statusFilter, sortBy, searchTerm, orders]);
-
-  useEffect(() => {
-    applyWishlistFilters(wishlist, products);
-  }, [searchTerm, wishlist, products]);
-
-  const handleInputChange = (e) => {
-    const { name, value } = e.target;
-    
-    if (name.startsWith('address_')) {
-      const addressField = name.replace('address_', '');
-      setFormData(prev => ({
-        ...prev,
-        address: {
-          ...prev.address,
-          [addressField]: value
-        }
-      }));
-    } else {
-      setFormData(prev => ({
-        ...prev,
-        [name]: value
-      }));
-    }
-  };
-
-  const handleSave = async (e) => {
-    e.preventDefault();
-    setSaving(true);
-    setError('');
-    setSuccess('');
-
-    try {
-      const token = localStorage.getItem('customerToken');
-      
-      const response = await fetch('/api/customers/profile', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-          phone: formData.phone,
-          address: formData.address
-        })
-      });
-
-      const data = await response.json();
-
-      if (data.success) {
-        setSuccess('Profile updated successfully!');
-        setEditing(false);
-        
-        const updatedCustomer = {
-          ...customer,
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-          phone: formData.phone
-        };
-        localStorage.setItem('customer', JSON.stringify(updatedCustomer));
-        setCustomer(updatedCustomer);
-        
-        setTimeout(() => setSuccess(''), 3000);
-      } else {
-        setError(data.error || 'Failed to update profile');
-      }
-    } catch (err) {
-      setError(err.message || 'An error occurred');
+      // Load trending products
+      await loadTrendingProducts(userId);
+    } catch (error) {
+      console.error('[Admin Dashboard] Error loading data:', error);
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
   };
 
-  const removeFromWishlist = async (productId) => {
+  const loadOrders = async () => {
     try {
-      const token = localStorage.getItem('customerToken');
+      const ordersRef = collection(firebaseDb, 'orders');
+      const ordersSnap = await getDocs(ordersRef);
+      
+      const loadedOrders = ordersSnap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
 
-      const response = await fetch('/api/customers/wishlist', {
-        method: 'DELETE',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ productId })
+      console.log('[Admin] Orders loaded:', loadedOrders.length);
+      setOrders(loadedOrders);
+
+      // Calculate order stats
+      const totalRevenue = loadedOrders.reduce((sum, order) => sum + (parseFloat(order.total) || 0), 0);
+      const totalCost = loadedOrders.reduce((sum, order) => sum + (parseFloat(order.shipping) || 0), 0);
+      const totalProfit = totalRevenue - totalCost;
+      const profitMargin = totalRevenue > 0 ? Math.round((totalProfit / totalRevenue) * 100) : 0;
+      const avgOrderValue = loadedOrders.length > 0 ? (totalRevenue / loadedOrders.length).toFixed(2) : 0;
+
+      setStats(prev => ({
+        ...prev,
+        totalRevenue: totalRevenue.toFixed(2),
+        totalProfit: totalProfit.toFixed(2),
+        totalCost: totalCost.toFixed(2),
+        totalOrders: loadedOrders.length,
+        profitMargin,
+        avgOrderValue,
+      }));
+    } catch (error) {
+      console.error('[Admin] Error loading orders:', error);
+    }
+  };
+
+  const loadProducts = async (userId) => {
+    try {
+      const productsRef = collection(firebaseDb, 'products');
+      const productsSnap = await getDocs(productsRef);
+      
+      const loadedProducts = productsSnap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      console.log('[Admin] Products loaded:', loadedProducts.length);
+      setProducts(loadedProducts);
+
+      const trendingCount = loadedProducts.filter(p => p.trendingSource).length;
+
+      setStats(prev => ({
+        ...prev,
+        totalProducts: loadedProducts.length,
+        trendingAdded: trendingCount,
+      }));
+    } catch (error) {
+      console.error('[Admin] Error loading products:', error);
+    }
+  };
+
+  const loadCustomers = async () => {
+    try {
+      const customersRef = collection(firebaseDb, 'customers');
+      const customersSnap = await getDocs(customersRef);
+      
+      const loadedCustomers = customersSnap.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }));
+
+      console.log('[Admin] Customers loaded:', loadedCustomers.length);
+      setCustomers(loadedCustomers);
+
+      setStats(prev => ({
+        ...prev,
+        totalCustomers: loadedCustomers.length,
+      }));
+    } catch (error) {
+      console.error('[Admin] Error loading customers:', error);
+    }
+  };
+
+  const loadIntegrations = async (userId) => {
+    try {
+      const integrationsRef = collection(firebaseDb, `users/${userId}/integrations`);
+      const integrationsSnap = await getDocs(integrationsRef);
+      
+      const integrationsData = {};
+      integrationsSnap.forEach(doc => {
+        integrationsData[doc.id] = doc.data();
       });
 
-      const data = await response.json();
-      
-      if (data.success) {
-        setWishlist(prev => prev.filter(id => id !== productId));
-        setSuccess('Removed from wishlist');
-        setTimeout(() => setSuccess(''), 3000);
-      }
-    } catch (err) {
-      setError('Failed to remove from wishlist');
+      console.log('[Admin] Integrations loaded:', Object.keys(integrationsData).length);
+      setIntegrations(integrationsData);
+
+      // Calculate feature status
+      const connected = {};
+      Object.keys(integrationsData).forEach(key => {
+        if (integrationsData[key]?.status === 'connected') {
+          connected[key] = true;
+        }
+      });
+
+      const features = {
+        trendingProducts: {
+          available: connected['printful'] || connected['shopify'],
+          missingAPIs: (!connected['printful'] && !connected['shopify']) ? ['Shopify or Printful'] : [],
+        },
+        orders: {
+          available: connected['shopify'],
+          missingAPIs: !connected['shopify'] ? ['Shopify'] : [],
+        },
+        products: {
+          available: connected['shopify'],
+          missingAPIs: !connected['shopify'] ? ['Shopify'] : [],
+        },
+      };
+
+      setFeatureStatus(features);
+    } catch (error) {
+      console.error('[Admin] Error loading integrations:', error);
     }
   };
 
-  const addToCart = (product) => {
+  const loadTrendingProducts = async (userId) => {
     try {
-      const cart = JSON.parse(localStorage.getItem('shoppingCart') || '[]');
-      const existingItem = cart.find(item => item.id === product.id);
-
-      if (existingItem) {
-        existingItem.quantity += 1;
+      setTrendingLoading(true);
+      const result = await fetchTrendingProducts(userId);
+      
+      if (result.success) {
+        console.log('[Admin] Trending products loaded:', result.products.length);
+        setTrendingProducts(result.products);
+        setTrendingStats(result.stats || {});
       } else {
-        cart.push({
-          ...product,
-          quantity: 1,
-          cartId: Date.now()
-        });
+        setTrendingError(result.error);
       }
-
-      localStorage.setItem('shoppingCart', JSON.stringify(cart));
-      setSuccess('Added to cart!');
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err) {
-      setError('Failed to add to cart');
+    } catch (error) {
+      console.error('[Admin] Error loading trending:', error);
+      setTrendingError(error.message);
+    } finally {
+      setTrendingLoading(false);
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('customer');
-    localStorage.removeItem('customerToken');
-    router.push('/customer/login');
+  const handleAddProductToStore = async (product) => {
+    try {
+      setAddingProduct(product.id);
+      const result = await addTrendingProductToStore(user.uid, product);
+
+      if (result.success) {
+        setAddMessage({ type: 'success', text: result.message });
+        setTimeout(async () => {
+          await loadAllData(user.uid);
+          setAddMessage(null);
+        }, 1500);
+      } else {
+        setAddMessage({ type: 'error', text: result.errors?.[0] || 'Failed to add product' });
+        setTimeout(() => setAddMessage(null), 3000);
+      }
+    } catch (err) {
+      setAddMessage({ type: 'error', text: err.message });
+      setTimeout(() => setAddMessage(null), 3000);
+    } finally {
+      setAddingProduct(null);
+    }
   };
+
+  const handleUpdateOrderStatus = async (orderId, newStatus) => {
+    try {
+      await updateDoc(doc(firebaseDb, 'orders', orderId), {
+        status: newStatus,
+        updatedAt: new Date().toISOString(),
+      });
+      
+      await loadOrders();
+      setShowOrderModal(false);
+      setAddMessage({ type: 'success', text: 'Order status updated!' });
+      setTimeout(() => setAddMessage(null), 2000);
+    } catch (error) {
+      console.error('Error updating order:', error);
+      setAddMessage({ type: 'error', text: 'Failed to update order' });
+    }
+  };
+
+  const handleDeleteOrder = async (orderId) => {
+    if (!confirm('Are you sure you want to delete this order?')) return;
+
+    try {
+      await deleteDoc(doc(firebaseDb, 'orders', orderId));
+      await loadOrders();
+      setShowOrderModal(false);
+      setAddMessage({ type: 'success', text: 'Order deleted!' });
+      setTimeout(() => setAddMessage(null), 2000);
+    } catch (error) {
+      console.error('Error deleting order:', error);
+      setAddMessage({ type: 'error', text: 'Failed to delete order' });
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      localStorage.removeItem('adminToken');
+      router.push('/');
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
+
+  const handleExport = () => {
+    const data = {
+      exportedAt: new Date().toISOString(),
+      stats,
+      ordersCount: orders.length,
+      productsCount: products.length,
+      customersCount: customers.length,
+      integrationsCount: Object.keys(integrations).length,
+    };
+
+    const dataStr = JSON.stringify(data, null, 2);
+    const dataBlob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(dataBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `admin_backup_${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const filteredOrders = orders.filter((order) => {
+    const matchesSearch = order.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         order.customerEmail?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                         order.productName?.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    const matchesFilter = filterStatus === 'all' || order.status === filterStatus;
+    return matchesSearch && matchesFilter;
+  });
 
   const getStatusColor = (status) => {
-    const colors = {
-      'pending': 'bg-yellow-900/30 border-yellow-500/30 text-yellow-400',
-      'pending_payment': 'bg-orange-900/30 border-orange-500/30 text-orange-400',
-      'paid': 'bg-blue-900/30 border-blue-500/30 text-blue-400',
-      'shipped': 'bg-purple-900/30 border-purple-500/30 text-purple-400',
-      'delivered': 'bg-green-900/30 border-green-500/30 text-green-400',
-      'cancelled': 'bg-red-900/30 border-red-500/30 text-red-400',
-    };
-    return colors[status] || colors['pending'];
-  };
-
-  const getStatusIcon = (status) => {
-    switch(status) {
-      case 'pending': return <Clock size={16} />;
-      case 'pending_payment': return <AlertCircle size={16} />;
-      case 'paid': return <CheckCircle size={16} />;
-      case 'shipped': return <Truck size={16} />;
-      case 'delivered': return <CheckCircle size={16} />;
-      case 'cancelled': return <AlertCircle size={16} />;
-      default: return <Package size={16} />;
+    switch (status) {
+      case 'completed':
+      case 'paid':
+        return 'bg-green-500/10 text-green-400';
+      case 'processing':
+        return 'bg-yellow-500/10 text-yellow-400';
+      case 'shipped':
+        return 'bg-blue-500/10 text-blue-400';
+      case 'pending':
+      case 'pending_payment':
+        return 'bg-orange-500/10 text-orange-400';
+      default:
+        return 'bg-gray-500/10 text-gray-400';
     }
   };
+
+  const getDisplayStatus = (status) => {
+    if (status === 'pending_payment') return 'Pending Payment';
+    return status?.charAt(0).toUpperCase() + status?.slice(1);
+  };
+
+  const generateChartData = () => {
+    const data = {};
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    days.forEach(day => {
+      data[day] = { day, revenue: 0, orders: 0 };
+    });
+
+    orders.forEach(order => {
+      try {
+        const date = new Date(order.createdAt || Date.now());
+        const dayIndex = date.getDay();
+        const day = days[(dayIndex + 6) % 7];
+
+        data[day].revenue += parseFloat(order.total) || 0;
+        data[day].orders += 1;
+      } catch (e) {
+        console.warn('Error processing order:', e);
+      }
+    });
+
+    return Object.values(data);
+  };
+
+  const chartData = generateChartData();
+  const intStatus = Object.keys(integrations).filter(key => integrations[key]?.status === 'connected').length;
+  const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'];
 
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
         <div className="text-center">
-          <Loader size={40} className="text-blue-500 animate-spin mx-auto mb-4" />
-          <p className="text-gray-400">Loading your account...</p>
+          <div className="w-12 h-12 border-4 border-yellow-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-gray-400">Loading dashboard...</p>
         </div>
       </div>
     );
   }
 
-  if (!customer) {
+  if (!user) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-4">
-        <div className="text-center max-w-md">
-          <AlertCircle size={48} className="text-red-500 mx-auto mb-4" />
-          <p className="text-white text-lg mb-4">Authentication Error</p>
-          <Link href="/customer/login" className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition">
-            Back to Login
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
+        <div className="text-center">
+          <p className="text-gray-400 mb-4">You need to be logged in</p>
+          <Link href="/admin/login" className="text-yellow-400 hover:underline">
+            Go to Admin Login
           </Link>
         </div>
       </div>
@@ -342,626 +398,515 @@ export default function CustomerAccount() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
       {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-blue-700 border-b border-blue-500">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-          <div className="flex items-center justify-between gap-4">
+      <div className="sticky top-0 z-40 bg-slate-800/50 backdrop-blur border-b border-slate-700">
+        <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Zap size={28} className="text-yellow-400" />
             <div>
-              <h1 className="text-3xl sm:text-4xl font-bold text-white flex items-center gap-3">
-                <User size={32} />
-                Welcome, {customer.firstName}!
-              </h1>
-              <p className="text-blue-100 mt-1">{customer.email}</p>
+              <h1 className="text-2xl font-bold text-white">📊 DropBoard Admin</h1>
+              <p className="text-xs text-gray-400">Complete Dashboard & Analytics</p>
             </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleExport}
+              className="p-2 hover:bg-slate-700 rounded-lg transition"
+              title="Export Data"
+            >
+              <Download size={20} className="text-gray-400" />
+            </button>
+            <Link href="/settings" className="p-2 hover:bg-slate-700 rounded-lg transition" title="Settings">
+              <Settings size={20} className="text-gray-400" />
+            </Link>
             <button
               onClick={handleLogout}
-              className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition font-semibold"
+              className="p-2 hover:bg-red-500/20 rounded-lg transition text-red-400"
+              title="Logout"
             >
-              <LogOut size={18} />
-              <span className="hidden sm:inline">Logout</span>
+              <LogOut size={20} />
             </button>
           </div>
         </div>
       </div>
 
-      {/* Messages */}
-      {success && (
-        <div className="bg-green-900/30 border-b border-green-500 text-green-200 px-4 sm:px-6 py-4 flex items-center gap-3 sticky top-0 z-30">
-          <CheckCircle size={20} />
-          <span>{success}</span>
-        </div>
-      )}
+      <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+        {/* Message Alert */}
+        {addMessage && (
+          <div className={`p-4 rounded-lg border ${addMessage.type === 'success' ? 'bg-green-900/30 border-green-500 text-green-200' : 'bg-red-900/30 border-red-500 text-red-200'}`}>
+            {addMessage.text}
+          </div>
+        )}
 
-      {error && (
-        <div className="bg-red-900/30 border-b border-red-500 text-red-200 px-4 sm:px-6 py-4 flex items-center gap-3 sticky top-0 z-30">
-          <AlertCircle size={20} />
-          <span>{error}</span>
+        {/* Welcome Section */}
+        <div className="space-y-2">
+          <h2 className="text-5xl font-bold text-white">Welcome Admin! 👋</h2>
+          <p className="text-lg text-gray-400">Complete platform overview and management</p>
+          <div className="flex items-center gap-2 text-sm text-gray-500 mt-4">
+            <span>📧 {user.email || 'Admin'}</span>
+            <span className="text-gray-700">•</span>
+            <span>ID: {user.uid?.substring(0, 8)}...</span>
+          </div>
         </div>
-      )}
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {/* Tabs */}
-        <div className="flex gap-2 sm:gap-4 mb-6 sm:mb-8 border-b border-slate-700 overflow-x-auto">
-          <button
-            onClick={() => setActiveTab('profile')}
-            className={`px-4 py-3 font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 ${
-              activeTab === 'profile'
-                ? 'border-blue-500 text-white'
-                : 'border-transparent text-gray-400 hover:text-white'
-            }`}
-          >
-            <User size={18} />
-            <span>Profile</span>
-          </button>
-          <button
-            onClick={() => setActiveTab('orders')}
-            className={`px-4 py-3 font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 ${
-              activeTab === 'orders'
-                ? 'border-blue-500 text-white'
-                : 'border-transparent text-gray-400 hover:text-white'
-            }`}
-          >
-            <Package size={18} />
-            <span>Orders</span>
-            {orders.length > 0 && <span className="bg-blue-600 text-white text-xs px-2 py-1 rounded-full">{orders.length}</span>}
-          </button>
-          <button
-            onClick={() => setActiveTab('wishlist')}
-            className={`px-4 py-3 font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 ${
-              activeTab === 'wishlist'
-                ? 'border-blue-500 text-white'
-                : 'border-transparent text-gray-400 hover:text-white'
-            }`}
-          >
-            <Heart size={18} />
-            <span>Wishlist</span>
-            {wishlist.length > 0 && <span className="bg-red-600 text-white text-xs px-2 py-1 rounded-full">{wishlist.length}</span>}
-          </button>
-          <button
-            onClick={() => setActiveTab('settings')}
-            className={`px-4 py-3 font-semibold border-b-2 transition whitespace-nowrap flex items-center gap-2 ${
-              activeTab === 'settings'
-                ? 'border-blue-500 text-white'
-                : 'border-transparent text-gray-400 hover:text-white'
-            }`}
-          >
-            <Settings size={18} />
-            <span>Settings</span>
-          </button>
+        <div className="border-b border-slate-700 flex gap-4 overflow-x-auto">
+          {[
+            { id: 'overview', label: '📊 Overview', icon: '📊' },
+            { id: 'orders', label: '🛒 Orders', icon: '🛒' },
+            { id: 'customers', label: '👥 Customers', icon: '👥' },
+            { id: 'products', label: '📦 Products', icon: '📦' },
+            { id: 'trending', label: '🔥 Trending', icon: '🔥' },
+            { id: 'integrations', label: '⚙️ Integrations', icon: '⚙️' },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-3 font-semibold border-b-2 transition whitespace-nowrap ${
+                activeTab === tab.id
+                  ? 'border-yellow-500 text-white'
+                  : 'border-transparent text-gray-400 hover:text-white'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
-        {/* PROFILE TAB */}
-        {activeTab === 'profile' && (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 sm:gap-8">
-            {/* Profile Card */}
-            <div className="lg:col-span-2">
-              <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 sm:p-8">
-                <div className="flex items-center justify-between mb-6 sm:mb-8">
-                  <h2 className="text-2xl font-bold text-white flex items-center gap-3">
-                    <User size={28} className="text-blue-400" />
-                    Profile Information
-                  </h2>
-                  {!editing && (
-                    <button
-                      onClick={() => setEditing(true)}
-                      className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition font-semibold"
-                    >
-                      <Edit2 size={18} />
-                      <span className="hidden sm:inline">Edit</span>
-                    </button>
-                  )}
-                </div>
+        {/* OVERVIEW TAB */}
+        {activeTab === 'overview' && (
+          <div className="space-y-8">
+            {/* Key Metrics */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
+              <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                <p className="text-gray-400 text-xs">Orders</p>
+                <p className="text-2xl font-bold text-yellow-400">{stats.totalOrders}</p>
+                <p className="text-xs text-gray-500 mt-1">All time</p>
+              </div>
 
-                {editing ? (
-                  <form onSubmit={handleSave} className="space-y-4 sm:space-y-6">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-300 mb-2">First Name</label>
-                        <input
-                          type="text"
-                          name="firstName"
-                          value={formData.firstName}
-                          onChange={handleInputChange}
-                          className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                          disabled={saving}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-300 mb-2">Last Name</label>
-                        <input
-                          type="text"
-                          name="lastName"
-                          value={formData.lastName}
-                          onChange={handleInputChange}
-                          className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                          disabled={saving}
-                        />
-                      </div>
-                    </div>
+              <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                <p className="text-gray-400 text-xs">Revenue</p>
+                <p className="text-2xl font-bold text-green-400">${stats.totalRevenue}</p>
+                <p className="text-xs text-gray-500 mt-1">Total sales</p>
+              </div>
 
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-300 mb-2">Email (Cannot Change)</label>
-                        <input
-                          type="email"
-                          value={customer.email}
-                          disabled
-                          className="w-full px-4 py-2 bg-slate-700 text-gray-400 border border-slate-600 rounded-lg opacity-50"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-gray-300 mb-2">Phone</label>
-                        <input
-                          type="tel"
-                          name="phone"
-                          value={formData.phone}
-                          onChange={handleInputChange}
-                          className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                          disabled={saving}
-                        />
-                      </div>
-                    </div>
+              <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                <p className="text-gray-400 text-xs">Profit</p>
+                <p className="text-2xl font-bold text-blue-400">${stats.totalProfit}</p>
+                <p className="text-xs text-gray-500 mt-1">{stats.profitMargin}% margin</p>
+              </div>
 
-                    <div>
-                      <h3 className="text-lg font-semibold text-white mb-4 mt-6 flex items-center gap-2">
-                        <MapPin size={22} />
-                        Shipping Address
-                      </h3>
-                      
-                      <div className="space-y-4">
-                        <div>
-                          <label className="block text-sm font-semibold text-gray-300 mb-2">Street Address</label>
-                          <input
-                            type="text"
-                            name="address_street"
-                            value={formData.address.street}
-                            onChange={handleInputChange}
-                            placeholder="123 Main Street"
-                            className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                            disabled={saving}
-                          />
-                        </div>
+              <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                <p className="text-gray-400 text-xs">Cost</p>
+                <p className="text-2xl font-bold text-orange-400">${stats.totalCost}</p>
+                <p className="text-xs text-gray-500 mt-1">Shipping</p>
+              </div>
 
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-semibold text-gray-300 mb-2">City</label>
-                            <input
-                              type="text"
-                              name="address_city"
-                              value={formData.address.city}
-                              onChange={handleInputChange}
-                              placeholder="New York"
-                              className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                              disabled={saving}
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-semibold text-gray-300 mb-2">State</label>
-                            <input
-                              type="text"
-                              name="address_state"
-                              value={formData.address.state}
-                              onChange={handleInputChange}
-                              placeholder="NY"
-                              className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                              disabled={saving}
-                            />
-                          </div>
-                        </div>
+              <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                <p className="text-gray-400 text-xs">Customers</p>
+                <p className="text-2xl font-bold text-pink-400">{stats.totalCustomers}</p>
+                <p className="text-xs text-gray-500 mt-1">Active</p>
+              </div>
 
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-sm font-semibold text-gray-300 mb-2">ZIP Code</label>
-                            <input
-                              type="text"
-                              name="address_zip"
-                              value={formData.address.zip}
-                              onChange={handleInputChange}
-                              placeholder="10001"
-                              className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                              disabled={saving}
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-semibold text-gray-300 mb-2">Country</label>
-                            <select
-                              name="address_country"
-                              value={formData.address.country}
-                              onChange={handleInputChange}
-                              className="w-full px-4 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition"
-                              disabled={saving}
-                            >
-                              <option>United States</option>
-                              <option>Canada</option>
-                              <option>United Kingdom</option>
-                              <option>Australia</option>
-                              <option>Other</option>
-                            </select>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex gap-3 pt-6 border-t border-slate-700">
-                      <button
-                        type="submit"
-                        disabled={saving}
-                        className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition font-semibold"
-                      >
-                        {saving ? (
-                          <>
-                            <Loader size={18} className="animate-spin" />
-                            Saving...
-                          </>
-                        ) : (
-                          <>
-                            <Save size={18} />
-                            Save Changes
-                          </>
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setEditing(false)}
-                        className="flex-1 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg flex items-center justify-center gap-2 transition font-semibold"
-                      >
-                        <X size={18} />
-                        Cancel
-                      </button>
-                    </div>
-                  </form>
-                ) : (
-                  <div className="space-y-6">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="bg-slate-700/50 rounded-lg p-4">
-                        <p className="text-gray-400 text-sm mb-1">First Name</p>
-                        <p className="text-white font-semibold text-lg">{customer.firstName}</p>
-                      </div>
-                      <div className="bg-slate-700/50 rounded-lg p-4">
-                        <p className="text-gray-400 text-sm mb-1">Last Name</p>
-                        <p className="text-white font-semibold text-lg">{customer.lastName}</p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                      <div className="bg-slate-700/50 rounded-lg p-4">
-                        <p className="text-gray-400 text-sm mb-1 flex items-center gap-2">
-                          <Mail size={16} />
-                          Email
-                        </p>
-                        <p className="text-white font-semibold">{customer.email}</p>
-                      </div>
-                      <div className="bg-slate-700/50 rounded-lg p-4">
-                        <p className="text-gray-400 text-sm mb-1 flex items-center gap-2">
-                          <Phone size={16} />
-                          Phone
-                        </p>
-                        <p className="text-white font-semibold">{customer.phone || 'Not set'}</p>
-                      </div>
-                    </div>
-                  </div>
-                )}
+              <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                <p className="text-gray-400 text-xs">Integrations</p>
+                <p className="text-2xl font-bold text-purple-400">{intStatus}</p>
+                <p className="text-xs text-gray-500 mt-1">Connected</p>
               </div>
             </div>
 
-            {/* Stats Card */}
-            <div className="space-y-4 sm:space-y-6">
-              <div className="bg-gradient-to-br from-blue-900/50 to-blue-800/50 border border-blue-500/30 rounded-lg p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  <Package size={24} className="text-blue-400" />
-                  <h3 className="text-lg font-bold text-white">Orders</h3>
+            {/* Charts */}
+            {orders.length > 0 && (
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                <div className="lg:col-span-3 bg-slate-800 border border-slate-700 rounded-lg p-6">
+                  <h3 className="text-lg font-bold text-white mb-4">Revenue Overview (Weekly)</h3>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={chartData}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                      <XAxis dataKey="day" stroke="#9ca3af" />
+                      <YAxis stroke="#9ca3af" />
+                      <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #374151' }} />
+                      <Legend />
+                      <Bar dataKey="revenue" fill="#10b981" radius={[8, 8, 0, 0]} />
+                      <Bar dataKey="orders" fill="#3b82f6" radius={[8, 8, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
                 </div>
-                <p className="text-4xl font-bold text-blue-400">{customer.order_count || 0}</p>
-                <p className="text-gray-400 text-sm mt-2">Total orders placed</p>
-              </div>
 
-              <div className="bg-gradient-to-br from-green-900/50 to-emerald-900/50 border border-green-500/30 rounded-lg p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  <Zap size={24} className="text-green-400" />
-                  <h3 className="text-lg font-bold text-white">Spending</h3>
+                <div className="bg-slate-800 border border-slate-700 rounded-lg p-6">
+                  <h3 className="text-lg font-bold text-white mb-4">Distribution</h3>
+                  <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                      <Pie
+                        data={[
+                          { name: 'Pending', value: orders.filter(o => o.status === 'pending_payment').length },
+                          { name: 'Paid', value: orders.filter(o => o.status === 'paid').length },
+                          { name: 'Shipped', value: orders.filter(o => o.status === 'shipped').length },
+                          { name: 'Completed', value: orders.filter(o => o.status === 'completed').length },
+                        ].filter(p => p.value > 0)}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={40}
+                        outerRadius={80}
+                        fill="#8884d8"
+                        dataKey="value"
+                      >
+                        {COLORS.map((color, index) => (
+                          <Cell key={`cell-${index}`} fill={color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
                 </div>
-                <p className="text-4xl font-bold text-green-400">${(customer.clv || 0).toFixed(2)}</p>
-                <p className="text-gray-400 text-sm mt-2">Total spent</p>
               </div>
+            )}
 
-              <div className="bg-gradient-to-br from-purple-900/50 to-purple-800/50 border border-purple-500/30 rounded-lg p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  <Heart size={24} className="text-purple-400" />
-                  <h3 className="text-lg font-bold text-white">Favorites</h3>
-                </div>
-                <p className="text-4xl font-bold text-purple-400">{wishlist.length}</p>
-                <p className="text-gray-400 text-sm mt-2">Saved products</p>
+            {/* Quick Stats */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                <p className="text-gray-400 text-sm mb-2">Average Order Value</p>
+                <p className="text-2xl font-bold text-green-400">${stats.avgOrderValue}</p>
               </div>
-
-              <button
-                onClick={() => setActiveTab('orders')}
-                className="block w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-lg text-center font-semibold transition"
-              >
-                View Orders
-              </button>
-
-              <Link
-                href="/trending"
-                className="block w-full bg-slate-700 hover:bg-slate-600 text-white px-4 py-3 rounded-lg text-center font-semibold transition"
-              >
-                Continue Shopping
-              </Link>
+              <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                <p className="text-gray-400 text-sm mb-2">Profit Margin</p>
+                <p className="text-2xl font-bold text-blue-400">{stats.profitMargin}%</p>
+              </div>
+              <div className="bg-slate-800 border border-slate-700 rounded-lg p-4">
+                <p className="text-gray-400 text-sm mb-2">Products (Trending)</p>
+                <p className="text-2xl font-bold text-purple-400">{stats.totalProducts} ({stats.trendingAdded})</p>
+              </div>
             </div>
           </div>
         )}
 
         {/* ORDERS TAB */}
         {activeTab === 'orders' && (
-          <div>
-            {/* Filters */}
-            <div className="bg-slate-800 rounded-lg border border-slate-700 p-4 sm:p-6 mb-6">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
-                    <Filter size={16} />
-                    Status
-                  </label>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="all">All Orders</option>
-                    <option value="pending">Pending</option>
-                    <option value="pending_payment">Pending Payment</option>
-                    <option value="paid">Paid</option>
-                    <option value="shipped">Shipped</option>
-                    <option value="delivered">Delivered</option>
-                    <option value="cancelled">Cancelled</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-300 mb-2">Sort By</label>
-                  <select
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="newest">Newest First</option>
-                    <option value="oldest">Oldest First</option>
-                    <option value="highest">Highest Amount</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-semibold text-gray-300 mb-2">Search</label>
-                  <div className="relative">
-                    <Search size={16} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
-                    <input
-                      type="text"
-                      placeholder="Search orders..."
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      className="w-full pl-10 pr-3 py-2 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Orders List */}
-            {filteredOrders.length === 0 ? (
-              <div className="bg-slate-800 rounded-lg border border-slate-700 p-12 text-center">
-                <Package size={48} className="text-gray-500 mx-auto mb-4" />
-                <p className="text-gray-400 text-lg mb-6">
-                  {orders.length === 0 ? 'No orders yet' : `No ${statusFilter} orders`}
-                </p>
-                <Link href="/trending" className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition font-semibold">
-                  Start Shopping
-                </Link>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {filteredOrders.map((order) => (
-                  <div key={order.id} className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden hover:border-blue-500 transition">
-                    <div className="p-4 sm:p-6 border-b border-slate-700">
-                      <div className="flex items-start justify-between mb-4 gap-4 flex-wrap">
-                        <div>
-                          <div className="flex items-center gap-2 mb-2">
-                            <p className="text-xs text-gray-400">Order ID</p>
-                            <p className="font-mono text-white font-bold">{order.id?.slice(0, 12)}...</p>
-                          </div>
-                          <p className="text-gray-400 text-sm">
-                            {new Date(order.created_at).toLocaleDateString()}
-                          </p>
-                        </div>
-                        <div className={`px-4 py-2 rounded-lg border ${getStatusColor(order.status)} flex items-center gap-2 text-sm font-semibold`}>
-                          {getStatusIcon(order.status)}
-                          {order.status.replace('_', ' ').toUpperCase()}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="px-4 sm:px-6 py-4 bg-slate-700/30">
-                      <p className="text-sm text-gray-400 mb-3">{order.items?.length || 1} item(s)</p>
-                      {order.items && order.items.map((item, idx) => (
-                        <div key={idx} className="flex items-center justify-between py-2 border-b border-slate-700 last:border-0 text-sm">
-                          <div>
-                            <p className="text-white font-medium">{item.name || item.productName}</p>
-                            <p className="text-gray-400 text-xs">Qty: {item.quantity}</p>
-                          </div>
-                          <p className="text-green-400 font-semibold">${(item.price * item.quantity).toFixed(2)}</p>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="px-4 sm:px-6 py-4 space-y-2 text-sm bg-slate-700/50">
-                      <div className="flex justify-between text-gray-300">
-                        <span>Total</span>
-                        <span className="text-green-400 font-bold">${order.total?.toFixed(2) || '0.00'}</span>
-                      </div>
-                    </div>
-
-                    {order.tracking_number && (
-                      <div className="px-4 sm:px-6 py-4 bg-green-900/20 border-t border-green-500/30">
-                        <p className="text-sm font-semibold text-green-400">📦 Tracking: {order.tracking_number}</p>
-                      </div>
-                    )}
-
-                    <div className="px-4 sm:px-6 py-4 border-t border-slate-700 flex gap-2">
-                      <Link
-                        href={`/orders/${order.id}`}
-                        className="flex-1 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 transition text-sm"
-                      >
-                        <Eye size={16} />
-                        View
-                      </Link>
-                      <button className="flex-1 bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 transition text-sm">
-                        <Download size={16} />
-                        Invoice
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* WISHLIST TAB */}
-        {activeTab === 'wishlist' && (
-          <div>
-            {/* Search */}
-            <div className="mb-6">
-              <div className="relative">
-                <Search size={20} className="absolute left-4 top-1/2 transform -translate-y-1/2 text-gray-400" />
+          <div className="space-y-6">
+            {/* Search & Filter */}
+            <div className="flex flex-col md:flex-row gap-4">
+              <div className="flex-1 relative">
+                <Search size={20} className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-500" />
                 <input
                   type="text"
-                  placeholder="Search your favorites..."
+                  placeholder="Search by customer, email, product..."
+                  className="w-full px-4 py-2 pl-10 bg-slate-800 text-white border border-slate-700 rounded-lg focus:outline-none focus:border-yellow-500"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-12 pr-4 py-3 bg-slate-800 text-white border border-slate-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                 />
               </div>
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="px-4 py-2 bg-slate-800 text-white border border-slate-700 rounded-lg focus:outline-none focus:border-yellow-500"
+              >
+                <option value="all">All Status</option>
+                <option value="pending_payment">Pending Payment</option>
+                <option value="paid">Paid</option>
+                <option value="processing">Processing</option>
+                <option value="shipped">Shipped</option>
+                <option value="completed">Completed</option>
+              </select>
             </div>
 
-            {/* Wishlist */}
-            {filteredWishlist.length === 0 ? (
-              <div className="bg-slate-800 rounded-lg border border-slate-700 p-12 text-center">
-                <Heart size={48} className="text-gray-500 mx-auto mb-4" />
-                <p className="text-gray-400 text-lg mb-6">
-                  {wishlist.length === 0 ? 'Your wishlist is empty' : 'No matching products'}
-                </p>
-                <Link href="/trending" className="inline-block bg-red-600 hover:bg-red-700 text-white px-6 py-2 rounded-lg transition font-semibold">
-                  Browse Products
-                </Link>
+            {/* Orders Table */}
+            <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-slate-700 bg-slate-900/50">
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Customer</th>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Product</th>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Email</th>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Total</th>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Status</th>
+                      <th className="px-6 py-3 text-right text-sm font-semibold text-gray-400">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredOrders.length > 0 ? (
+                      filteredOrders.map((order) => (
+                        <tr key={order.id} className="border-b border-slate-700 hover:bg-slate-700/50 transition">
+                          <td className="px-6 py-4 text-sm font-semibold text-white">{order.customerName}</td>
+                          <td className="px-6 py-4 text-sm text-gray-300">{order.productName}</td>
+                          <td className="px-6 py-4 text-sm text-gray-300">{order.customerEmail}</td>
+                          <td className="px-6 py-4 text-sm font-semibold text-green-400">${order.total?.toFixed(2)}</td>
+                          <td className="px-6 py-4">
+                            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${getStatusColor(order.status)}`}>
+                              {getDisplayStatus(order.status)}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-right">
+                            <button
+                              onClick={() => {
+                                setSelectedOrder(order);
+                                setShowOrderModal(true);
+                              }}
+                              className="p-2 hover:bg-slate-600 rounded transition"
+                            >
+                              <Eye size={16} className="text-gray-400" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="6" className="px-6 py-8 text-center text-gray-400">
+                          No orders found
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredWishlist.map(productId => {
-                  const product = products[productId];
-                  if (!product) return null;
+            </div>
+          </div>
+        )}
 
-                  return (
-                    <div key={productId} className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden hover:border-red-500 transition group">
-                      {product.image && (
-                        <div className="h-48 overflow-hidden bg-slate-700 relative">
-                          <img src={product.image} alt={product.name} className="w-full h-full object-cover group-hover:scale-105 transition" />
-                        </div>
+        {/* CUSTOMERS TAB */}
+        {activeTab === 'customers' && (
+          <div className="space-y-6">
+            <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-slate-700 bg-slate-900/50">
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Name</th>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Email</th>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Phone</th>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Spent</th>
+                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Orders</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {customers.length > 0 ? (
+                      customers.map((customer) => (
+                        <tr key={customer.id} className="border-b border-slate-700 hover:bg-slate-700/50 transition">
+                          <td className="px-6 py-4 text-sm font-semibold text-white">{customer.firstName} {customer.lastName}</td>
+                          <td className="px-6 py-4 text-sm text-gray-300">{customer.email}</td>
+                          <td className="px-6 py-4 text-sm text-gray-300">{customer.phone || 'N/A'}</td>
+                          <td className="px-6 py-4 text-sm font-semibold text-green-400">${customer.total_spent?.toFixed(2) || '0.00'}</td>
+                          <td className="px-6 py-4 text-sm text-blue-400">{customer.order_count || 0}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan="5" className="px-6 py-8 text-center text-gray-400">
+                          No customers yet
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* PRODUCTS TAB */}
+        {activeTab === 'products' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {products.length > 0 ? (
+                products.map((product) => (
+                  <div key={product.id} className="bg-slate-800 border border-slate-700 rounded-lg overflow-hidden hover:border-yellow-500 transition">
+                    {product.image && (
+                      <div className="h-40 overflow-hidden bg-slate-700">
+                        <img src={product.image} alt={product.name} className="w-full h-full object-cover" />
+                      </div>
+                    )}
+                    <div className="p-4">
+                      <h3 className="font-semibold text-white line-clamp-2 mb-2">{product.name}</h3>
+                      <p className="text-lg font-bold text-green-400 mb-3">${parseFloat(product.price || 0).toFixed(2)}</p>
+                      <p className="text-xs text-gray-400 mb-2">Category: {product.category || 'N/A'}</p>
+                      {product.trendingSource && (
+                        <p className="text-xs text-orange-400 mb-2">📊 From: {product.trendingSource}</p>
                       )}
+                      <p className="text-xs text-gray-500">Stock: {product.inventory || 0}</p>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="col-span-3 text-center py-8 text-gray-400">
+                  No products yet
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
-                      <div className="p-4 space-y-4">
-                        <div>
-                          <h3 className="font-semibold text-white line-clamp-2 group-hover:text-red-400 transition text-sm sm:text-base mb-2">
-                            {product.name}
-                          </h3>
-                          {product.category && (
-                            <p className="text-xs text-gray-400">{product.category}</p>
-                          )}
-                        </div>
+        {/* TRENDING TAB */}
+        {activeTab === 'trending' && (
+          <div className="space-y-6">
+            {featureStatus.trendingProducts?.available ? (
+              <>
+                <div className="flex items-center justify-between">
+                  <h3 className="text-2xl font-bold text-white">🔥 Hot Trending Products</h3>
+                  <p className="text-xs text-gray-400">Shopify: {trendingStats.shopify} | Printful: {trendingStats.printful_custom}</p>
+                </div>
 
-                        <div className="flex items-center justify-between">
-                          <p className="text-xl sm:text-2xl font-bold text-green-400">
-                            ${parseFloat(product.price || 0).toFixed(2)}
+                {trendingLoading ? (
+                  <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-8 text-center">
+                    <div className="w-8 h-8 border-4 border-orange-400 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                    <p className="text-gray-400">Loading trending products...</p>
+                  </div>
+                ) : trendingError ? (
+                  <div className="bg-red-900/30 border border-red-500 rounded-lg p-4 text-red-200">
+                    <p className="text-sm">❌ {trendingError}</p>
+                  </div>
+                ) : trendingProducts.length > 0 ? (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {trendingProducts.slice(0, 8).map((product) => (
+                      <div key={product.id} className="bg-gradient-to-br from-slate-800 to-slate-900 border border-slate-700 rounded-lg overflow-hidden hover:border-orange-500 transition">
+                        {product.image && (
+                          <div className="h-32 overflow-hidden bg-slate-700">
+                            <img src={product.image} alt={product.title} className="w-full h-full object-cover" />
+                          </div>
+                        )}
+                        <div className="p-4">
+                          <h4 className="font-semibold text-white text-sm line-clamp-2 mb-2">{product.title}</h4>
+                          <p className={`text-xs font-medium w-fit px-2 py-1 rounded mb-2 ${product.supplier?.includes('Shopify') ? 'bg-green-900/50 text-green-300' : 'bg-blue-900/50 text-blue-300'}`}>
+                            {product.supplier}
                           </p>
-                          {product.rating && (
-                            <div className="flex items-center gap-1">
-                              <Star size={16} className="fill-yellow-400 text-yellow-400" />
-                              <span className="text-xs text-gray-400">{product.rating}</span>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex gap-2 pt-3 border-t border-slate-700">
+                          <p className="text-lg font-bold text-green-400 mb-3">${parseFloat(product.price || 0).toFixed(2)}</p>
                           <button
-                            onClick={() => addToCart(product)}
-                            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded text-xs sm:text-sm font-semibold flex items-center justify-center gap-1 transition"
+                            onClick={() => handleAddProductToStore(product)}
+                            disabled={addingProduct === product.id}
+                            className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 text-white py-2 rounded font-medium text-sm transition"
                           >
-                            <ShoppingCart size={14} />
-                            <span className="hidden sm:inline">Add</span>
-                          </button>
-                          <Link
-                            href={`/p/${productId}`}
-                            className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded text-xs sm:text-sm font-semibold flex items-center justify-center gap-1 transition"
-                          >
-                            <Eye size={14} />
-                            <span className="hidden sm:inline">View</span>
-                          </Link>
-                          <button
-                            onClick={() => removeFromWishlist(productId)}
-                            className="flex-1 bg-red-900/30 hover:bg-red-900/50 border border-red-500/30 text-red-400 py-2 rounded text-xs sm:text-sm font-semibold flex items-center justify-center gap-1 transition"
-                          >
-                            <Trash2 size={14} />
+                            {addingProduct === product.id ? 'Adding...' : 'Add to Store'}
                           </button>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    ))}
+                  </div>
+                ) : (
+                  <div className="bg-slate-800/50 border border-slate-700 rounded-lg p-8 text-center">
+                    <p className="text-gray-400">No trending products available</p>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-6">
+                <h3 className="font-bold text-yellow-400 mb-2">🔒 Trending Products Locked</h3>
+                <p className="text-sm text-gray-400">Connect Shopify or Printful integration to access trending products</p>
+                <Link href="/settings" className="text-blue-400 text-sm font-semibold mt-2 inline-block hover:underline">
+                  Go to Integrations →
+                </Link>
               </div>
             )}
           </div>
         )}
 
-        {/* SETTINGS TAB */}
-        {activeTab === 'settings' && (
-          <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 sm:p-8">
-            <h2 className="text-2xl font-bold text-white mb-6 flex items-center gap-3">
-              <Settings size={28} className="text-gray-400" />
-              Account Settings
-            </h2>
-            
-            <div className="space-y-4 mb-8">
-              <div className="bg-slate-700/50 rounded-lg p-4 border border-slate-600">
-                <p className="text-white font-semibold mb-2">Email Notifications</p>
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input type="checkbox" className="w-4 h-4 rounded accent-blue-500" defaultChecked />
-                  <span className="text-gray-400 text-sm">Receive order updates via email</span>
-                </label>
-              </div>
-
-              <div className="bg-slate-700/50 rounded-lg p-4 border border-slate-600">
-                <p className="text-white font-semibold mb-2">Marketing Emails</p>
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input type="checkbox" className="w-4 h-4 rounded accent-blue-500" />
-                  <span className="text-gray-400 text-sm">Receive promotions and special offers</span>
-                </label>
-              </div>
-
-              <div className="bg-slate-700/50 rounded-lg p-4 border border-slate-600">
-                <p className="text-white font-semibold mb-2">SMS Notifications</p>
-                <label className="flex items-center gap-3 cursor-pointer">
-                  <input type="checkbox" className="w-4 h-4 rounded accent-blue-500" />
-                  <span className="text-gray-400 text-sm">Receive shipping updates via SMS</span>
-                </label>
-              </div>
+        {/* INTEGRATIONS TAB */}
+        {activeTab === 'integrations' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                { key: 'shopify', icon: '🛍️', name: 'Shopify' },
+                { key: 'printful', icon: '📦', name: 'Printful' },
+                { key: 'stripe', icon: '💳', name: 'Stripe' },
+                { key: 'tiktok', icon: '🎵', name: 'TikTok' },
+              ].map(({ key, icon, name }) => (
+                <div key={key} className="bg-slate-800 border border-slate-700 rounded-lg p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold text-white">{icon} {name}</h3>
+                    {integrations[key]?.status === 'connected' ? (
+                      <CheckCircle size={20} className="text-green-400" />
+                    ) : (
+                      <Clock size={20} className="text-gray-500" />
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-400 mb-4">
+                    {integrations[key]?.status === 'connected' ? '✅ Connected & Active' : '⏳ Not connected'}
+                  </p>
+                  <Link href="/settings" className="text-blue-400 text-sm font-semibold hover:underline">
+                    {integrations[key]?.status === 'connected' ? 'Manage' : 'Connect'} →
+                  </Link>
+                </div>
+              ))}
             </div>
-
-            <button
-              onClick={handleLogout}
-              className="w-full mt-6 bg-red-600 hover:bg-red-700 text-white px-4 py-3 rounded-lg font-semibold flex items-center justify-center gap-2 transition"
-            >
-              <LogOut size={18} />
-              Logout
-            </button>
           </div>
         )}
       </div>
+
+      {/* Order Modal */}
+      {showOrderModal && selectedOrder && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-slate-800 rounded-lg max-w-2xl w-full border border-slate-700 p-8 max-h-96 overflow-y-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold text-white">Order Details</h2>
+              <button onClick={() => setShowOrderModal(false)} className="text-gray-400 hover:text-white text-2xl">×</button>
+            </div>
+
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-gray-400 text-sm">Customer</p>
+                  <p className="text-white font-semibold">{selectedOrder.customerName}</p>
+                </div>
+                <div>
+                  <p className="text-gray-400 text-sm">Email</p>
+                  <p className="text-white font-semibold">{selectedOrder.customerEmail}</p>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-gray-400 text-sm">Product</p>
+                <p className="text-white font-semibold">{selectedOrder.productName}</p>
+              </div>
+
+              <div className="border-t border-slate-700 pt-4">
+                <p className="text-gray-400 text-sm mb-3">Financial Details</p>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <p className="text-gray-400 text-xs">Subtotal</p>
+                    <p className="text-blue-400 text-lg font-bold">${selectedOrder.subtotal?.toFixed(2)}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400 text-xs">Tax</p>
+                    <p className="text-yellow-400 text-lg font-bold">${selectedOrder.tax?.toFixed(2)}</p>
+                  </div>
+                  <div>
+                    <p className="text-gray-400 text-xs">Total</p>
+                    <p className="text-green-400 text-lg font-bold">${selectedOrder.total?.toFixed(2)}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="border-t border-slate-700 pt-4">
+                <p className="text-gray-400 text-sm mb-3">Update Status</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {['pending_payment', 'paid', 'processing', 'shipped', 'completed'].map(status => (
+                    <button
+                      key={status}
+                      onClick={() => handleUpdateOrderStatus(selectedOrder.id, status)}
+                      className={`py-2 px-3 rounded text-sm font-semibold transition ${
+                        selectedOrder.status === status
+                          ? 'bg-yellow-600 text-white'
+                          : 'bg-slate-700 text-gray-300 hover:bg-slate-600'
+                      }`}
+                    >
+                      {getDisplayStatus(status)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex gap-2 pt-4 border-t border-slate-700">
+                <button onClick={() => setShowOrderModal(false)} className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg font-semibold transition">
+                  Close
+                </button>
+                <button
+                  onClick={() => handleDeleteOrder(selectedOrder.id)}
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white py-2 rounded-lg font-semibold transition"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
