@@ -1,4 +1,4 @@
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export async function GET(request) {
@@ -15,22 +15,11 @@ export async function GET(request) {
       );
     }
 
-    const token = authHeader.substring(7); // Remove "Bearer " prefix
-    console.log('[Profile API] Token received:', token.substring(0, 20) + '...');
+    const token = authHeader.substring(7);
+    console.log('[Profile API] Token received');
 
-    // Verify token with Firebase Admin SDK (optional, can be added later)
-    // For now, we'll trust the token came from the client
-
-    // Extract user ID from token or use Firebase Auth
-    // Since we can't easily verify JWT in Next.js without admin SDK,
-    // we'll accept the request and let the client provide the user ID
-
-    // Get user ID from request body or headers
-    let userId = null;
-
-    // Try to get userId from custom header
-    userId = request.headers.get('X-User-ID');
-    
+    // Get user ID from header
+    const userId = request.headers.get('X-User-ID');
     if (!userId) {
       console.error('[Profile API] No User ID provided');
       return Response.json(
@@ -41,87 +30,93 @@ export async function GET(request) {
 
     console.log('[Profile API] Looking up customer:', userId);
 
-    // Query Firestore for customer
-    const customersRef = collection(db, 'customers');
-    const q = query(customersRef, where('uid', '==', userId));
-    const querySnapshot = await getDocs(q);
-
-    if (querySnapshot.empty) {
-      console.log('[Profile API] No customer found with uid:', userId);
+    // TRY 1: Search by document ID (most common)
+    try {
+      const docRef = doc(db, 'customers', userId);
+      const docSnap = await getDoc(docRef);
       
-      // Try alternative: search by document ID
-      try {
-        const customerDoc = await getDocs(collection(db, 'customers'));
-        let foundCustomer = null;
-        
-        customerDoc.forEach(doc => {
-          if (doc.id === userId) {
-            foundCustomer = { id: doc.id, ...doc.data() };
-          }
-        });
-
-        if (foundCustomer) {
-          console.log('[Profile API] Customer found by doc ID');
-          return Response.json({
-            id: foundCustomer.id,
-            uid: foundCustomer.uid || foundCustomer.id,
-            email: foundCustomer.email,
-            firstName: foundCustomer.firstName || 'Customer',
-            lastName: foundCustomer.lastName || '',
-            phone: foundCustomer.phone || '',
-            createdAt: foundCustomer.createdAt,
-          });
-        }
-
-        // Create default customer profile
-        console.log('[Profile API] Creating default customer profile');
+      if (docSnap.exists()) {
+        console.log('[Profile API] ✅ Customer found by document ID');
+        const data = docSnap.data();
         return Response.json({
-          id: userId,
-          uid: userId,
-          email: '',
-          firstName: 'Customer',
-          lastName: '',
-          phone: '',
-          createdAt: new Date().toISOString(),
-        });
-      } catch (err) {
-        console.error('[Profile API] Error searching by doc ID:', err.message);
-        
-        // Return minimal customer object
-        return Response.json({
-          id: userId,
-          uid: userId,
-          email: '',
-          firstName: 'Customer',
-          lastName: '',
-          phone: '',
-          createdAt: new Date().toISOString(),
+          id: docSnap.id,
+          uid: data.uid || docSnap.id,
+          email: data.email || '',
+          firstName: data.firstName || 'Customer',
+          lastName: data.lastName || '',
+          phone: data.phone || '',
+          createdAt: data.createdAt || new Date().toISOString(),
         });
       }
+    } catch (err) {
+      console.log('[Profile API] Document ID search failed, trying other methods...');
     }
 
-    // Found customer
-    const customerDoc = querySnapshot.docs[0];
-    const customerData = customerDoc.data();
+    // TRY 2: Search by uid field
+    try {
+      const customersRef = collection(db, 'customers');
+      const q = query(customersRef, where('uid', '==', userId));
+      const querySnapshot = await getDocs(q);
 
-    console.log('[Profile API] Customer found:', customerDoc.id);
+      if (!querySnapshot.empty) {
+        console.log('[Profile API] ✅ Customer found by uid field');
+        const doc = querySnapshot.docs[0];
+        const data = doc.data();
+        return Response.json({
+          id: doc.id,
+          uid: data.uid || doc.id,
+          email: data.email || '',
+          firstName: data.firstName || 'Customer',
+          lastName: data.lastName || '',
+          phone: data.phone || '',
+          createdAt: data.createdAt || new Date().toISOString(),
+        });
+      }
+    } catch (err) {
+      console.log('[Profile API] UID field search failed, trying email...');
+    }
 
-    const response = {
-      id: customerDoc.id,
-      uid: customerData.uid || customerDoc.id,
-      email: customerData.email,
-      firstName: customerData.firstName || 'Customer',
-      lastName: customerData.lastName || '',
-      phone: customerData.phone || '',
-      createdAt: customerData.createdAt,
-    };
+    // TRY 3: Search by email (as fallback)
+    try {
+      const customersRef = collection(db, 'customers');
+      const allDocs = await getDocs(customersRef);
+      
+      for (const docSnapshot of allDocs.docs) {
+        const data = docSnapshot.data();
+        // Check if this document matches our user ID in any way
+        if (docSnapshot.id === userId || data.uid === userId) {
+          console.log('[Profile API] ✅ Customer found by search');
+          return Response.json({
+            id: docSnapshot.id,
+            uid: data.uid || docSnapshot.id,
+            email: data.email || '',
+            firstName: data.firstName || 'Customer',
+            lastName: data.lastName || '',
+            phone: data.phone || '',
+            createdAt: data.createdAt || new Date().toISOString(),
+          });
+        }
+      }
+    } catch (err) {
+      console.log('[Profile API] Collection search failed');
+    }
 
-    console.log('[Profile API] === REQUEST SUCCESS ===');
-    return Response.json(response);
+    // NOT FOUND: Return minimal profile
+    console.log('[Profile API] ⚠️ Customer not found, returning minimal profile');
+    return Response.json({
+      id: userId,
+      uid: userId,
+      email: '',
+      firstName: 'Customer',
+      lastName: '',
+      phone: '',
+      createdAt: new Date().toISOString(),
+    });
 
   } catch (error) {
     console.error('[Profile API] === REQUEST ERROR ===');
     console.error('[Profile API] Error:', error.message);
+    console.error('[Profile API] Stack:', error.stack);
     
     // Return fallback response instead of error
     return Response.json({
@@ -132,7 +127,7 @@ export async function GET(request) {
       lastName: '',
       phone: '',
       createdAt: new Date().toISOString(),
-    });
+    }, { status: 200 });
   }
 }
 
