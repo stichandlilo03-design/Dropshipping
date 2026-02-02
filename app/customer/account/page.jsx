@@ -20,6 +20,7 @@ function CustomerDashboardContent() {
   const [loading, setLoading] = useState(true);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [showModal, setShowModal] = useState(false);
+  const [unreadNotifications, setUnreadNotifications] = useState(0);
 
   useEffect(() => {
     loadCustomerData();
@@ -42,6 +43,18 @@ function CustomerDashboardContent() {
       const savedWishlist = localStorage.getItem('wishlist');
       if (savedWishlist) {
         setWishlist(JSON.parse(savedWishlist));
+      }
+
+      // Load unread notifications count
+      const savedNotifications = localStorage.getItem('notifications');
+      if (savedNotifications) {
+        try {
+          const notifications = JSON.parse(savedNotifications);
+          const unread = notifications.filter((n) => !n.read).length;
+          setUnreadNotifications(unread);
+        } catch (error) {
+          console.error('Error parsing notifications:', error);
+        }
       }
 
       // Load orders
@@ -80,7 +93,7 @@ function CustomerDashboardContent() {
 
       loadedOrders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
       setOrders(loadedOrders);
-      setFilteredOrders(loadedOrders.slice(0, 5)); // Show 5 latest
+      setFilteredOrders(loadedOrders.slice(0, 5));
     } catch (error) {
       console.error('[Orders] Error:', error);
     }
@@ -99,7 +112,6 @@ function CustomerDashboardContent() {
         });
       });
 
-      // Sort by views (trending)
       products.sort((a, b) => (b.views || 0) - (a.views || 0));
       setTrendingProducts(products.slice(0, 6));
     } catch (error) {
@@ -120,7 +132,6 @@ function CustomerDashboardContent() {
         });
       });
 
-      // Sort by rating
       products.sort((a, b) => (b.rating || 0) - (a.rating || 0));
       setRecommendedProducts(products.slice(0, 6));
     } catch (error) {
@@ -188,44 +199,8 @@ function CustomerDashboardContent() {
       );
     }
 
-    if (statusStr === 'confirmed') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-blue-600/20 text-blue-400">
-          <CheckCircle size={14} />
-          Confirmed
-        </span>
-      );
-    }
-
-    if (statusStr === 'processing') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-blue-600/20 text-blue-400">
-          <Clock size={14} />
-          Processing
-        </span>
-      );
-    }
-
-    if (statusStr === 'shipped') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-purple-600/20 text-purple-400">
-          <Truck size={14} />
-          Shipped
-        </span>
-      );
-    }
-
-    if (statusStr === 'completed') {
-      return (
-        <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-green-600/20 text-green-400">
-          <Package size={14} />
-          Delivered
-        </span>
-      );
-    }
-
     return (
-      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-gray-600/20 text-gray-400">
+      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-semibold bg-blue-600/20 text-blue-400">
         {status}
       </span>
     );
@@ -258,7 +233,6 @@ function CustomerDashboardContent() {
 
   const paidCount = orders.filter((o) => String(o.status || '').toLowerCase() === 'paid').length;
   const pendingCount = orders.filter((o) => String(o.status || '').toLowerCase() === 'pending_payment').length;
-  const shippedCount = orders.filter((o) => ['shipped', 'completed'].includes(String(o.status || '').toLowerCase())).length;
   const totalSpent = orders
     .filter((o) => String(o.status || '').toLowerCase() === 'paid')
     .reduce((sum, o) => sum + parseFloat(o.total || 0), 0);
@@ -279,10 +253,20 @@ function CustomerDashboardContent() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <button className="p-2 hover:bg-slate-700 rounded-lg transition relative">
-                <Bell size={20} className="text-gray-400" />
-                <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
-              </button>
+              {/* Notification Button - NOW CLICKABLE */}
+              <Link
+                href="/customer/notifications"
+                className="p-2 hover:bg-slate-700 rounded-lg transition relative group"
+                title="Notifications"
+              >
+                <Bell size={20} className="text-gray-400 group-hover:text-yellow-400" />
+                {unreadNotifications > 0 && (
+                  <span className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                    {unreadNotifications > 9 ? '9+' : unreadNotifications}
+                  </span>
+                )}
+              </Link>
+
               <button className="p-2 hover:bg-slate-700 rounded-lg transition">
                 <Settings size={20} className="text-gray-400" />
               </button>
@@ -384,10 +368,10 @@ function CustomerDashboardContent() {
 
               <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-gray-400 text-sm">In Transit</p>
-                  <Truck size={20} className="text-purple-400" />
+                  <p className="text-gray-400 text-sm">Pending Orders</p>
+                  <Clock size={20} className="text-yellow-400" />
                 </div>
-                <p className="text-3xl font-bold text-purple-400">{shippedCount}</p>
+                <p className="text-3xl font-bold text-yellow-400">{pendingCount}</p>
               </div>
 
               <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
@@ -401,15 +385,10 @@ function CustomerDashboardContent() {
 
             {/* Recent Orders */}
             <div>
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                  <Clock size={20} />
-                  Recent Orders
-                </h3>
-                <Link href="/customer/tracking" className="text-blue-400 hover:text-blue-300 text-sm font-semibold">
-                  View All →
-                </Link>
-              </div>
+              <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                <Clock size={20} />
+                Recent Orders
+              </h3>
               <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -555,16 +534,48 @@ function CustomerDashboardContent() {
 
         {/* TRACKING TAB */}
         {activeTab === 'tracking' && (
-          <div className="text-center py-12">
-            <Truck size={48} className="text-purple-400 mx-auto mb-4" />
-            <h3 className="text-2xl font-bold text-white mb-2">📦 Track Your Orders</h3>
-            <p className="text-gray-400 mb-6">See real-time updates on your confirmed and shipped orders</p>
-            <Link
-              href="/customer/tracking"
-              className="inline-block bg-purple-600 hover:bg-purple-700 text-white px-8 py-3 rounded-lg font-bold transition"
-            >
-              Go to Order Tracking →
-            </Link>
+          <div className="space-y-6">
+            <div className="bg-gradient-to-r from-purple-600 to-purple-700 rounded-lg p-6 text-white">
+              <h2 className="text-2xl font-bold mb-2">📦 Track Your Orders</h2>
+              <p className="text-purple-100">View real-time tracking for your confirmed and shipped orders</p>
+            </div>
+
+            <div className="bg-slate-800 rounded-lg border border-slate-700 p-8 text-center">
+              <Truck size={48} className="text-purple-400 mx-auto mb-4" />
+              <h3 className="text-xl font-bold text-white mb-2">Order Tracking</h3>
+              <p className="text-gray-400 mb-6">Track your shipments in real-time with detailed status updates and estimated delivery dates.</p>
+              <Link
+                href="/customer/tracking"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg transition"
+              >
+                <Truck size={18} />
+                Go to Tracking Page
+              </Link>
+            </div>
+
+            {/* Quick Stats */}
+            {orders.length > 0 && (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                  <p className="text-gray-400 text-sm">Confirmed Orders</p>
+                  <p className="text-3xl font-bold text-green-400">
+                    {orders.filter((o) => ['paid', 'confirmed', 'processing', 'shipped', 'completed'].includes(String(o.status || '').toLowerCase())).length}
+                  </p>
+                </div>
+                <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                  <p className="text-gray-400 text-sm">Shipped Orders</p>
+                  <p className="text-3xl font-bold text-purple-400">
+                    {orders.filter((o) => String(o.status || '').toLowerCase() === 'shipped').length}
+                  </p>
+                </div>
+                <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
+                  <p className="text-gray-400 text-sm">Delivered Orders</p>
+                  <p className="text-3xl font-bold text-blue-400">
+                    {orders.filter((o) => String(o.status || '').toLowerCase() === 'completed').length}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -747,17 +758,6 @@ function CustomerDashboardContent() {
                   <Zap size={18} />
                   Continue Payment
                 </button>
-              )}
-
-              {/* Track Order Button */}
-              {['confirmed', 'processing', 'shipped', 'completed'].includes(String(selectedOrder.status || '').toLowerCase()) && (
-                <Link
-                  href="/customer/tracking"
-                  className="w-full bg-purple-600 hover:bg-purple-700 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition"
-                >
-                  <Truck size={18} />
-                  Track This Order
-                </Link>
               )}
 
               <button
