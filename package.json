@@ -1,6 +1,6 @@
 {
   "name": "dropshipping-dashboard",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -17,11 +17,25 @@
     "recharts": "2.10.3",
     "lucide-react": "0.344.0",
     "nodemailer": "^6.9.7",
+    "nodemailer-sendgrid-transport": "^0.1.4",
+    "@sendgrid/mail": "^7.7.0",
     "axios": "^1.6.2",
     "jose": "^5.2.0",
     "js-cookie": "^3.0.5",
     "dotenv": "^16.3.1",
-    "stripe": "^14.0.0"
+    "stripe": "^14.0.0",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.0",
+    "zod": "^3.22.0",
+    "papaparse": "^5.4.0",
+    "react-hook-form": "^7.48.0",
+    "easypost": "^7.10.0",
+    "socket.io-client": "^4.6.0",
+    "pdfkit": "^0.13.0",
+    "multer": "^1.4.5",
+    "node-cron": "^3.0.0",
+    "clsx": "^2.0.0",
+    "date-fns": "^2.30.0"
   },
   "devDependencies": {
     "autoprefixer": "10.4.16",
@@ -29,6 +43,10 @@
     "tailwindcss": "3.3.6",
     "@types/node": "^20.10.6",
     "@types/react": "^18.2.45",
-    "@types/react-dom": "^18.2.18"
+    "@types/react-dom": "^18.2.18",
+    "@types/bcryptjs": "^2.4.2",
+    "@types/jsonwebtoken": "^9.0.5",
+    "@types/node-cron": "^3.0.7",
+    "@types/multer": "^1.4.11"
   }
 }
