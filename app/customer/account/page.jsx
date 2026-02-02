@@ -1,15 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Search, Eye, Trash2, ArrowLeft, LogOut, Settings, Package, ShoppingCart, Heart, Bell } from 'lucide-react';
-import { auth } from '@/lib/firebase';
-import { db } from '@/lib/firebase';
-import { collection, getDocs, updateDoc, deleteDoc, doc, onAuthStateChanged } from 'firebase/firestore';
-import { signOut } from 'firebase/auth';
 
-export default function CustomerAccount() {
+function CustomerAccountContent() {
   const router = useRouter();
   const [user, setUser] = useState(null);
   const [customer, setCustomer] = useState(null);
@@ -21,66 +17,64 @@ export default function CustomerAccount() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('orders');
 
-  // Load customer data and auth
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (!currentUser) {
-        router.push('/customer/login');
-        return;
-      }
+    const loadData = async () => {
+      try {
+        console.log('[CustomerAccount] Starting load...');
+        setLoading(true);
 
-      console.log('[CustomerAccount] User authenticated:', currentUser.uid);
-      setUser(currentUser);
+        // Get customer data from localStorage
+        const customerData = localStorage.getItem('customer');
+        const token = localStorage.getItem('customerToken');
 
-      // Get customer data from localStorage
-      const customerData = localStorage.getItem('customer');
-      if (customerData) {
+        console.log('[CustomerAccount] Customer data:', customerData);
+        console.log('[CustomerAccount] Token:', token ? 'exists' : 'missing');
+
+        if (!customerData || !token) {
+          console.log('[CustomerAccount] No customer data or token, redirecting to login');
+          router.push('/customer/login');
+          return;
+        }
+
         const parsedCustomer = JSON.parse(customerData);
-        console.log('[CustomerAccount] Customer data:', parsedCustomer.email);
+        console.log('[CustomerAccount] Parsed customer:', parsedCustomer);
         setCustomer(parsedCustomer);
-        
+
         // Load orders for this customer
         await loadCustomerOrders(parsedCustomer.id, parsedCustomer.email);
-      } else {
-        console.log('[CustomerAccount] No customer data in localStorage');
+        setLoading(false);
+      } catch (error) {
+        console.error('[CustomerAccount] Error:', error);
         setLoading(false);
       }
-    });
+    };
 
-    return () => unsubscribe();
+    loadData();
   }, [router]);
 
-  // Load orders - SAME WAY AS ADMIN
   const loadCustomerOrders = async (customerId, customerEmail) => {
     try {
-      console.log('[Orders] Loading orders for customer:', customerId);
-      setLoading(true);
+      console.log('[CustomerAccount] Loading orders for:', customerId, customerEmail);
 
-      // Get ALL orders from Firestore
-      const ordersRef = collection(db, 'orders');
-      const querySnapshot = await getDocs(ordersRef);
-
-      const allOrders = [];
-      querySnapshot.forEach((doc) => {
-        const orderData = doc.data();
-        
-        // FILTER: Only show orders for THIS customer
-        if (orderData.customerId === customerId || orderData.customerEmail === customerEmail) {
-          console.log('[Orders] Found order for customer:', doc.id);
-          allOrders.push({
-            id: doc.id,
-            ...orderData,
-          });
-        }
+      // Fetch from Firestore
+      const response = await fetch('/api/orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ customerId, customerEmail }),
       });
 
-      console.log('[Orders] Total customer orders:', allOrders.length);
-      setOrders(allOrders);
-      setLoading(false);
+      const data = await response.json();
+
+      if (data.success) {
+        console.log('[CustomerAccount] Orders loaded:', data.orders.length);
+        setOrders(data.orders || []);
+      } else {
+        console.error('[CustomerAccount] Error:', data.error);
+        setOrders([]);
+      }
     } catch (err) {
-      console.error('[Orders] Error loading orders:', err);
+      console.error('[CustomerAccount] Error loading orders:', err);
       setOrders([]);
-      setLoading(false);
     }
   };
 
@@ -116,15 +110,10 @@ export default function CustomerAccount() {
     return matchesSearch && matchesFilter;
   });
 
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      localStorage.removeItem('customer');
-      localStorage.removeItem('customerToken');
-      router.push('/');
-    } catch (error) {
-      console.error('Logout error:', error);
-    }
+  const handleLogout = () => {
+    localStorage.removeItem('customer');
+    localStorage.removeItem('customerToken');
+    router.push('/');
   };
 
   if (loading) {
@@ -138,7 +127,7 @@ export default function CustomerAccount() {
     );
   }
 
-  if (!user || !customer) {
+  if (!customer) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
         <div className="max-w-md w-full bg-slate-800 rounded-lg border border-slate-700 p-8 text-center space-y-6">
@@ -203,7 +192,7 @@ export default function CustomerAccount() {
             <div>
               <p className="text-gray-400 text-sm">Member Since</p>
               <p className="text-white font-semibold">
-                {customer.created_at ? new Date(customer.created_at).toLocaleDateString() : 'Unknown'}
+                {customer.created_at ? new Date(customer.created_at).toLocaleDateString() : 'Recently'}
               </p>
             </div>
           </div>
@@ -461,5 +450,24 @@ export default function CustomerAccount() {
         </div>
       )}
     </div>
+  );
+}
+
+function AccountSuspense() {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+        <p className="text-gray-400">Loading...</p>
+      </div>
+    </div>
+  );
+}
+
+export default function CustomerAccountPage() {
+  return (
+    <Suspense fallback={<AccountSuspense />}>
+      <CustomerAccountContent />
+    </Suspense>
   );
 }
