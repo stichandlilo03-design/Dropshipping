@@ -3,8 +3,8 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Search, Eye, ArrowLeft, LogOut, Settings, ShoppingCart, Heart, Bell, Package } from 'lucide-react';
-import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
+import { Search, Eye, ArrowLeft, LogOut, Settings, ShoppingCart, Heart, Bell } from 'lucide-react';
+import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 function CustomerAccountContent() {
@@ -17,6 +17,7 @@ function CustomerAccountContent() {
   const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('orders');
+  const [debugInfo, setDebugInfo] = useState('');
 
   useEffect(() => {
     const loadData = async () => {
@@ -29,7 +30,6 @@ function CustomerAccountContent() {
         const token = localStorage.getItem('customerToken');
 
         console.log('[CustomerAccount] Customer data:', customerData);
-        console.log('[CustomerAccount] Token:', token ? 'exists' : 'missing');
 
         if (!customerData || !token) {
           console.log('[CustomerAccount] No customer data, redirecting to login');
@@ -46,6 +46,7 @@ function CustomerAccountContent() {
         setLoading(false);
       } catch (error) {
         console.error('[CustomerAccount] Error:', error);
+        setDebugInfo(`Error: ${error.message}`);
         setLoading(false);
       }
     };
@@ -55,65 +56,100 @@ function CustomerAccountContent() {
 
   const loadCustomerOrdersFromFirestore = async (customerId, customerEmail) => {
     try {
-      console.log('[CustomerAccount] Loading orders from Firestore for:', customerId, customerEmail);
+      console.log('[CustomerAccount] Loading orders from Firestore');
+      console.log('Looking for customerId:', customerId);
+      console.log('Looking for customerEmail:', customerEmail);
 
       const ordersRef = collection(db, 'orders');
       const ordersSnap = await getDocs(ordersRef);
 
-      const customerOrders = [];
+      let foundOrders = [];
+      let debugMessages = [];
 
-      ordersSnap.forEach(doc => {
+      ordersSnap.forEach((doc, index) => {
         const orderData = doc.data();
         
-        // Match by customerId OR customerEmail
-        if (
+        // Log first 2 orders for debugging
+        if (index < 2) {
+          console.log(`[Order ${index}] Keys:`, Object.keys(orderData));
+          console.log(`[Order ${index}] Data:`, orderData);
+          debugMessages.push(`Order ${index} fields: ${Object.keys(orderData).join(', ')}`);
+        }
+
+        // Universal matching - check multiple possible field names
+        const matchesCustomer = 
+          // Check by customerId
           (orderData.customerId && orderData.customerId === customerId) ||
-          (orderData.customerEmail && orderData.customerEmail === customerEmail)
-        ) {
-          customerOrders.push({
+          (orderData.customer_id && orderData.customer_id === customerId) ||
+          (orderData.userId && orderData.userId === customerId) ||
+          (orderData.user_id && orderData.user_id === customerId) ||
+          (orderData.uid && orderData.uid === customerId) ||
+          // Check by email
+          (orderData.customerEmail && orderData.customerEmail === customerEmail) ||
+          (orderData.customer_email && orderData.customer_email === customerEmail) ||
+          (orderData.email && orderData.email === customerEmail) ||
+          // Check by customer object
+          (orderData.customer && orderData.customer.id === customerId) ||
+          (orderData.customer && orderData.customer.email === customerEmail);
+
+        if (matchesCustomer) {
+          console.log('[CustomerAccount] ✅ Order matched:', doc.id);
+          foundOrders.push({
             id: doc.id,
             ...orderData,
           });
         }
       });
 
-      console.log('[CustomerAccount] Orders found:', customerOrders.length);
-      setOrders(customerOrders);
+      console.log('[CustomerAccount] Total orders found:', foundOrders.length);
+      setOrders(foundOrders);
+      setDebugInfo(debugMessages.join('\n'));
+
+      // If no orders found, show ALL orders for debugging
+      if (foundOrders.length === 0) {
+        console.warn('[CustomerAccount] ⚠️ No matching orders found. Showing sample orders for debugging:');
+        const allOrders = [];
+        ordersSnap.forEach((doc) => {
+          allOrders.push({
+            id: doc.id,
+            ...doc.data(),
+          });
+        });
+        console.log('All orders in database:', allOrders.length);
+        if (allOrders.length > 0) {
+          console.log('Sample order structure:', allOrders[0]);
+        }
+      }
     } catch (err) {
       console.error('[CustomerAccount] Error loading orders:', err);
+      setDebugInfo(`Firestore error: ${err.message}`);
       setOrders([]);
     }
   };
 
   const getStatusColor = (status) => {
-    switch (status) {
-      case 'completed':
-      case 'paid':
-        return 'bg-green-500/10 text-green-400';
-      case 'processing':
-        return 'bg-yellow-500/10 text-yellow-400';
-      case 'shipped':
-        return 'bg-blue-500/10 text-blue-400';
-      case 'pending':
-      case 'pending_payment':
-        return 'bg-orange-500/10 text-orange-400';
-      default:
-        return 'bg-gray-500/10 text-gray-400';
-    }
+    const statusStr = String(status || '').toLowerCase();
+    if (statusStr.includes('completed') || statusStr.includes('paid')) return 'bg-green-500/10 text-green-400';
+    if (statusStr.includes('processing')) return 'bg-yellow-500/10 text-yellow-400';
+    if (statusStr.includes('shipped')) return 'bg-blue-500/10 text-blue-400';
+    if (statusStr.includes('pending')) return 'bg-orange-500/10 text-orange-400';
+    return 'bg-gray-500/10 text-gray-400';
   };
 
   const getDisplayStatus = (status) => {
-    if (status === 'pending_payment') return 'Pending Payment';
-    return status?.charAt(0).toUpperCase() + status?.slice(1);
+    if (!status) return 'Unknown';
+    const str = String(status);
+    if (str === 'pending_payment') return 'Pending Payment';
+    return str.charAt(0).toUpperCase() + str.slice(1);
   };
 
   const filteredOrders = orders.filter((order) => {
     const matchesSearch =
-      order.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.productName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      order.id?.toLowerCase().includes(searchTerm.toLowerCase());
+      String(order.customerName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      String(order.productName || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      String(order.id || '').toLowerCase().includes(searchTerm.toLowerCase());
     
-    const matchesFilter = filterStatus === 'all' || order.status === filterStatus;
+    const matchesFilter = filterStatus === 'all' || String(order.status) === filterStatus;
     return matchesSearch && matchesFilter;
   });
 
@@ -140,10 +176,7 @@ function CustomerAccountContent() {
         <div className="max-w-md w-full bg-slate-800 rounded-lg border border-slate-700 p-8 text-center space-y-6">
           <h1 className="text-2xl font-bold text-white">Not Logged In</h1>
           <p className="text-gray-400">Please login to view your account</p>
-          <Link
-            href="/customer/login"
-            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold block"
-          >
+          <Link href="/customer/login" className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold block">
             Go to Login
           </Link>
         </div>
@@ -169,10 +202,7 @@ function CustomerAccountContent() {
             <Link href="/settings" className="p-2 hover:bg-slate-700 rounded-lg transition">
               <Settings size={20} className="text-gray-400" />
             </Link>
-            <button
-              onClick={handleLogout}
-              className="p-2 hover:bg-red-500/20 rounded-lg transition text-red-400"
-            >
+            <button onClick={handleLogout} className="p-2 hover:bg-red-500/20 rounded-lg transition text-red-400">
               <LogOut size={20} />
             </button>
           </div>
@@ -180,15 +210,20 @@ function CustomerAccountContent() {
       </div>
 
       <div className="max-w-7xl mx-auto px-6 py-8 space-y-6">
-        {/* Customer Info Card */}
+        {/* Debug Info */}
+        {debugInfo && (
+          <div className="bg-yellow-900/30 border border-yellow-500/50 rounded-lg p-4">
+            <p className="text-yellow-400 text-sm whitespace-pre-wrap">{debugInfo}</p>
+          </div>
+        )}
+
+        {/* Customer Info */}
         <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
           <h2 className="text-xl font-bold text-white mb-4">Profile Information</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <p className="text-gray-400 text-sm">Full Name</p>
-              <p className="text-white font-semibold">
-                {customer.firstName} {customer.lastName || ''}
-              </p>
+              <p className="text-white font-semibold">{customer.firstName} {customer.lastName || ''}</p>
             </div>
             <div>
               <p className="text-gray-400 text-sm">Email</p>
@@ -205,7 +240,7 @@ function CustomerAccountContent() {
           </div>
         </div>
 
-        {/* Stats Cards */}
+        {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
             <p className="text-gray-400 text-sm">Total Orders</p>
@@ -220,7 +255,10 @@ function CustomerAccountContent() {
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
             <p className="text-gray-400 text-sm">Pending Orders</p>
             <p className="text-3xl font-bold text-orange-400 mt-2">
-              {orders.filter(o => o.status === 'pending' || o.status === 'pending_payment').length}
+              {orders.filter(o => {
+                const status = String(o.status || '').toLowerCase();
+                return status.includes('pending');
+              }).length}
             </p>
           </div>
         </div>
@@ -309,7 +347,7 @@ function CustomerAccountContent() {
                     {filteredOrders.length > 0 ? (
                       filteredOrders.map((order) => (
                         <tr key={order.id} className="border-b border-slate-700 hover:bg-slate-700/50 transition">
-                          <td className="px-6 py-4 text-sm font-mono text-white">{order.id.substring(0, 8)}...</td>
+                          <td className="px-6 py-4 text-sm font-mono text-white">{String(order.id).substring(0, 8)}...</td>
                           <td className="px-6 py-4 text-sm text-gray-300 line-clamp-1">{order.productName || 'N/A'}</td>
                           <td className="px-6 py-4 text-sm text-gray-300">
                             {order.createdAt ? new Date(order.createdAt).toLocaleDateString() : 'N/A'}
@@ -354,9 +392,6 @@ function CustomerAccountContent() {
           <div className="bg-slate-800 rounded-lg border border-slate-700 p-8 text-center">
             <Heart size={40} className="mx-auto text-gray-600 mb-4" />
             <p className="text-gray-400">No items in wishlist yet</p>
-            <Link href="/" className="text-blue-400 hover:underline mt-4 inline-block">
-              Start shopping →
-            </Link>
           </div>
         )}
 
@@ -375,17 +410,14 @@ function CustomerAccountContent() {
               </label>
               <label className="flex items-center gap-3 cursor-pointer">
                 <input type="checkbox" className="w-4 h-4 accent-blue-500" />
-                <span className="text-gray-300">Promotional offers and updates</span>
+                <span className="text-gray-300">Promotional offers</span>
               </label>
             </div>
-            <button className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-semibold mt-6">
-              Save Preferences
-            </button>
           </div>
         )}
       </div>
 
-      {/* Order Details Modal */}
+      {/* Order Modal */}
       {showModal && selectedOrder && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-slate-800 rounded-lg max-w-2xl w-full border border-slate-700 p-8 max-h-96 overflow-y-auto">
@@ -426,21 +458,15 @@ function CustomerAccountContent() {
                 <div className="grid grid-cols-3 gap-4">
                   <div>
                     <p className="text-gray-400 text-xs">Subtotal</p>
-                    <p className="text-blue-400 text-lg font-bold">
-                      ${parseFloat(selectedOrder.subtotal || 0).toFixed(2)}
-                    </p>
+                    <p className="text-blue-400 text-lg font-bold">${parseFloat(selectedOrder.subtotal || 0).toFixed(2)}</p>
                   </div>
                   <div>
                     <p className="text-gray-400 text-xs">Tax</p>
-                    <p className="text-yellow-400 text-lg font-bold">
-                      ${parseFloat(selectedOrder.tax || 0).toFixed(2)}
-                    </p>
+                    <p className="text-yellow-400 text-lg font-bold">${parseFloat(selectedOrder.tax || 0).toFixed(2)}</p>
                   </div>
                   <div>
                     <p className="text-gray-400 text-xs">Total</p>
-                    <p className="text-green-400 text-lg font-bold">
-                      ${parseFloat(selectedOrder.total || 0).toFixed(2)}
-                    </p>
+                    <p className="text-green-400 text-lg font-bold">${parseFloat(selectedOrder.total || 0).toFixed(2)}</p>
                   </div>
                 </div>
               </div>
