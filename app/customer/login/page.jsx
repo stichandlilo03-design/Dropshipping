@@ -1,13 +1,13 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { signInWithEmailAndPassword } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { Loader, AlertCircle, Eye, EyeOff, ArrowRight } from 'lucide-react';
 
-export default function CustomerLogin() {
+function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState('');
@@ -47,32 +47,49 @@ export default function CustomerLogin() {
 
       // Get customer data
       const token = await user.getIdToken();
-      const response = await fetch(`/api/customers/get-by-email?email=${encodeURIComponent(email)}`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
+      
+      // Store auth info
+      localStorage.setItem('customerToken', token);
+      
+      // For checkout flow, store customer minimal data and redirect
+      if (isCheckout) {
+        const customerData = {
+          id: user.uid,
+          email: user.email,
+          firstName: user.displayName?.split(' ')[0] || 'Customer',
+          lastName: user.displayName?.split(' ')[1] || '',
+        };
+        localStorage.setItem('customer', JSON.stringify(customerData));
+        
+        // Get pending checkout data
+        const pendingCheckout = localStorage.getItem('pendingCheckout');
+        if (pendingCheckout) {
+          // Redirect to checkout payment page
+          window.location.href = '/checkout?step=payment';
+        } else {
+          router.push('/checkout?step=payment');
         }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.customer) {
-          localStorage.setItem('customer', JSON.stringify(data.customer));
-          localStorage.setItem('customerToken', token);
-
-          // If coming from checkout, redirect to payment
-          if (isCheckout) {
-            // Get pending checkout data
-            const pendingCheckout = localStorage.getItem('pendingCheckout');
-            if (pendingCheckout) {
-              // Redirect to checkout payment page
-              router.push('/checkout?step=payment');
-            } else {
-              router.push('/customer/account');
+      } else {
+        // Normal login flow - fetch full customer profile
+        try {
+          const response = await fetch('/api/customers/profile', {
+            headers: {
+              'Authorization': `Bearer ${token}`
             }
-          } else {
-            router.push('/customer/account');
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            if (data.customer) {
+              localStorage.setItem('customer', JSON.stringify(data.customer));
+            }
           }
+        } catch (err) {
+          console.error('[Profile Fetch] Error:', err);
+          // Still proceed, customer data will be in localStorage
         }
+
+        router.push('/customer/account');
       }
     } catch (err) {
       console.error('[Login] Error:', err);
@@ -194,5 +211,24 @@ export default function CustomerLogin() {
         </div>
       </div>
     </div>
+  );
+}
+
+function LoginSuspense() {
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+        <p className="text-gray-400">Loading...</p>
+      </div>
+    </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoginSuspense />}>
+      <LoginContent />
+    </Suspense>
   );
 }
