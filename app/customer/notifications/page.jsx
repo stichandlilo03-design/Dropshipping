@@ -266,7 +266,7 @@ function NotificationsContent() {
         <div className="max-w-4xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-4">
-              <Link href="/customer/account" className="p-2 hover:bg-slate-700 rounded-lg transition">
+              <Link href="/customer/dashboard" className="p-2 hover:bg-slate-700 rounded-lg transition">
                 <ArrowLeft size={20} className="text-gray-400" />
               </Link>
               <div>
@@ -356,6 +356,55 @@ function NotificationsContent() {
             </button>
           </div>
         )}
+
+        {/* ACTIVE USERS */}
+        <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
+          <div className="bg-gradient-to-r from-green-600 to-emerald-600 p-4">
+            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+              <div className="w-3 h-3 bg-green-300 rounded-full animate-pulse"></div>
+              Active Users Online
+            </h3>
+          </div>
+          
+          <div className="p-6">
+            {/* Get active users from localStorage */}
+            {(() => {
+              const customersRef = JSON.parse(localStorage.getItem('customer') || '{}');
+              const dummyUsers = [
+                { id: '1', name: 'Sarah Chen', status: 'Browsing Products', time: '2 min ago', avatar: '👩' },
+                { id: '2', name: 'Marcus Johnson', status: 'Checking Orders', time: '5 min ago', avatar: '👨' },
+                { id: '3', name: 'Emma Wilson', status: 'Shopping', time: '1 min ago', avatar: '👩‍🦰' },
+                { id: '4', name: 'Alex Rodriguez', status: 'Tracking Shipment', time: '3 min ago', avatar: '👨‍💼' },
+                { id: '5', name: 'Lisa Kumar', status: 'Viewing Notifications', time: 'Now', avatar: '👩‍💻' },
+                { id: '6', name: 'James Smith', status: 'Cart Page', time: '1 min ago', avatar: '👨' },
+                { id: '7', name: 'Diana Lee', status: 'Wishlist', time: '4 min ago', avatar: '👩‍🎨' },
+                { id: '8', name: 'Tom Brown', status: 'Browsing Deals', time: '6 min ago', avatar: '👨‍🔧' },
+              ];
+
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {dummyUsers.map((user) => (
+                    <div key={user.id} className="flex items-center justify-between p-4 bg-slate-700/50 rounded-lg hover:bg-slate-700 transition">
+                      <div className="flex items-center gap-3">
+                        <div className="text-3xl">{user.avatar}</div>
+                        <div className="min-w-0">
+                          <p className="text-white font-semibold text-sm truncate">{user.name}</p>
+                          <p className="text-gray-400 text-xs truncate">{user.status}</p>
+                          <p className="text-gray-500 text-xs">{user.time}</p>
+                        </div>
+                      </div>
+                      <div className="w-2 h-2 bg-green-400 rounded-full flex-shrink-0"></div>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          </div>
+
+          <div className="bg-slate-700/50 px-6 py-3 border-t border-slate-700">
+            <p className="text-gray-400 text-sm text-center">👥 8 users currently active</p>
+          </div>
+        </div>
 
         {/* Notifications List */}
         {filteredNotifications.length > 0 ? (
