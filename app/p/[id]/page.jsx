@@ -1,16 +1,18 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { doc, getDoc, addDoc, collection, getDocs, updateDoc, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { ArrowLeft, Star, ShoppingCart, Heart, Copy, Check, Truck, Shield, RefreshCw, Mail, AlertCircle, Loader, X, Plus, Minus, TrendingUp, Eye, Zap, Lock, CreditCard, Trash2 } from 'lucide-react';
+import { ArrowLeft, Star, ShoppingCart, Heart, Copy, Check, Truck, Shield, RefreshCw, Mail, AlertCircle, Loader, X, Plus, Minus, TrendingUp, Eye, Zap, Lock, Trash2 } from 'lucide-react';
 
-const CART_STORAGE_KEY = 'dropship_cart';
+// Use same key as checkout page expects
+const CART_STORAGE_KEY = 'cart';
 
 export default function ProductPage() {
   const params = useParams();
+  const router = useRouter();
   const cartRef = useRef(null);
   const [product, setProduct] = useState(null);
   const [relatedProducts, setRelatedProducts] = useState([]);
@@ -20,17 +22,14 @@ export default function ProductPage() {
   const [liked, setLiked] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
-  const [checkoutLoading, setCheckoutLoading] = useState(false);
-  const [checkoutError, setCheckoutError] = useState(null);
   const [activeTab, setActiveTab] = useState('details');
   const [cart, setCart] = useState([]);
   const [showCartDropdown, setShowCartDropdown] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
-  const [formErrors, setFormErrors] = useState({});
+  const [checkoutError, setCheckoutError] = useState(null);
   const [cartLoaded, setCartLoaded] = useState(false);
   const [emailCheckLoading, setEmailCheckLoading] = useState(false);
-  const [emailExists, setEmailExists] = useState(null);
-  const [checkoutStep, setCheckoutStep] = useState('form'); // form, email-check, success
+  const [formErrors, setFormErrors] = useState({});
   
   const [formData, setFormData] = useState({
     email: '',
@@ -47,14 +46,17 @@ export default function ProductPage() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       try {
-        const savedCart = localStorage.getItem('shoppingCart');
+        // Check both old and new keys for backwards compatibility
+        const savedCart = localStorage.getItem(CART_STORAGE_KEY) || localStorage.getItem('shoppingCart');
         if (savedCart) {
           const parsedCart = JSON.parse(savedCart);
-          setCart(parsedCart);
-          console.log('[Cart] Loaded from localStorage:', parsedCart.length, 'items');
+          const cartArray = Array.isArray(parsedCart) ? parsedCart : [];
+          setCart(cartArray);
+          console.log('[Cart] Loaded from localStorage:', cartArray.length, 'items');
         }
       } catch (err) {
         console.error('[Cart] Error loading from localStorage:', err);
+        setCart([]);
       }
       setCartLoaded(true);
     }
@@ -65,10 +67,10 @@ export default function ProductPage() {
     if (typeof window !== 'undefined' && cartLoaded) {
       try {
         if (cart.length > 0) {
-          localStorage.setItem('shoppingCart', JSON.stringify(cart));
+          localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart));
           console.log('[Cart] Saved to localStorage:', cart.length, 'items');
         } else {
-          localStorage.removeItem('shoppingCart');
+          localStorage.removeItem(CART_STORAGE_KEY);
           console.log('[Cart] Cleared from localStorage');
         }
       } catch (err) {
@@ -120,7 +122,7 @@ export default function ProductPage() {
               views: currentViews + 1
             }));
           } catch (err) {
-            console.log('[Views] Note: Could not update views:', err.message);
+            console.log('[Views] Could not update views:', err.message);
           }
         } else {
           setError('Product not found');
@@ -175,34 +177,60 @@ export default function ProductPage() {
     const itemToAdd = prod || product;
     const itemQuantity = prod ? 1 : quantity;
 
+    if (!itemToAdd) {
+      console.error('[Cart] No product to add');
+      return;
+    }
+
+    // Ensure all required fields are present and correct types
+    const cartItem = {
+      id: String(itemToAdd.id),
+      productId: String(itemToAdd.productId || itemToAdd.id),
+      name: String(itemToAdd.name || itemToAdd.productName || 'Product'),
+      productName: String(itemToAdd.name || itemToAdd.productName || 'Product'),
+      price: parseFloat(itemToAdd.price) || 0,
+      quantity: parseInt(itemQuantity) || 1,
+      image: itemToAdd.image ? String(itemToAdd.image) : '',
+      category: itemToAdd.category ? String(itemToAdd.category) : '',
+      description: itemToAdd.description ? String(itemToAdd.description) : '',
+    };
+
+    console.log('[Cart] Adding item:', cartItem);
+
     setCart(prevCart => {
-      const existingItem = prevCart.find(item => item.id === itemToAdd.id);
+      const existingItem = prevCart.find(item => item.id === cartItem.id);
+      let updated;
+      
       if (existingItem) {
-        return prevCart.map(item =>
-          item.id === itemToAdd.id
+        updated = prevCart.map(item =>
+          item.id === cartItem.id
             ? { ...item, quantity: item.quantity + itemQuantity }
             : item
         );
+      } else {
+        updated = [...prevCart, cartItem];
       }
-      return [...prevCart, { ...itemToAdd, quantity: itemQuantity, cartId: Date.now() }];
+
+      console.log('[Cart] Updated cart:', updated);
+      return updated;
     });
 
     setShowSuccess(true);
     setTimeout(() => setShowSuccess(false), 2000);
   };
 
-  const removeFromCart = (cartId) => {
-    setCart(prevCart => prevCart.filter(item => item.cartId !== cartId));
+  const removeFromCart = (itemId) => {
+    setCart(prevCart => prevCart.filter(item => item.id !== itemId));
   };
 
-  const updateCartQuantity = (cartId, newQuantity) => {
+  const updateCartQuantity = (itemId, newQuantity) => {
     if (newQuantity < 1) {
-      removeFromCart(cartId);
+      removeFromCart(itemId);
       return;
     }
     setCart(prevCart =>
       prevCart.map(item =>
-        item.cartId === cartId
+        item.id === itemId
           ? { ...item, quantity: newQuantity }
           : item
       )
@@ -219,74 +247,52 @@ export default function ProductPage() {
   const tax = parseFloat((cartTotal * 0.08).toFixed(2));
   const grandTotal = parseFloat((cartTotal + shipping + tax).toFixed(2));
 
-  const validateForm = () => {
-    const errors = {};
-    
-    if (!formData.email || !formData.email.includes('@')) errors.email = 'Valid email required';
-    if (!formData.fullName.trim()) errors.fullName = 'Full name required';
-    if (!formData.phone.trim()) errors.phone = 'Phone number required';
-    if (!formData.address.trim()) errors.address = 'Address required';
-    
-    setFormErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
-
-  // Check if email exists in database
-  const checkEmailExists = async (email) => {
-    try {
-      setEmailCheckLoading(true);
-      
-      const customersRef = collection(db, 'customers');
-      const q = query(customersRef, where('email', '==', email));
-      const querySnapshot = await getDocs(q);
-      
-      const exists = !querySnapshot.empty;
-      setEmailExists(exists);
-      
-      return exists;
-    } catch (err) {
-      console.error('[Email Check] Error:', err);
-      setCheckoutError('Error checking email. Please try again.');
-      return false;
-    } finally {
-      setEmailCheckLoading(false);
-    }
-  };
-
-  // NEW: Email check and redirect flow
+  // Email check and redirect flow
   const handleEmailCheck = async (e) => {
     e.preventDefault();
     
-    // Validate email field
     if (!formData.email || !formData.email.includes('@')) {
       setFormErrors({ email: 'Valid email required' });
       return;
     }
 
     setCheckoutError(null);
-    const exists = await checkEmailExists(formData.email);
-    
-    // Save checkout data to localStorage before redirecting
-    const checkoutData = {
-      email: formData.email,
-      fullName: formData.fullName,
-      phone: formData.phone,
-      address: formData.address,
-      city: formData.city,
-      state: formData.state,
-      zipCode: formData.zipCode,
-      country: formData.country,
-      cartData: cart,
-      timestamp: new Date().toISOString()
-    };
-    localStorage.setItem('pendingCheckout', JSON.stringify(checkoutData));
+    setEmailCheckLoading(true);
 
-    if (exists) {
-      // Email exists - redirect to login
-      window.location.href = `/customer/login?email=${encodeURIComponent(formData.email)}&checkout=true`;
-    } else {
-      // Email doesn't exist - redirect to register
-      window.location.href = `/customer/register?email=${encodeURIComponent(formData.email)}&checkout=true`;
+    try {
+      const customersRef = collection(db, 'customers');
+      const q = query(customersRef, where('email', '==', formData.email));
+      const querySnapshot = await getDocs(q);
+      
+      const exists = !querySnapshot.empty;
+
+      // Save checkout data to localStorage before redirecting
+      const checkoutData = {
+        email: formData.email,
+        fullName: formData.fullName,
+        phone: formData.phone,
+        address: formData.address,
+        city: formData.city,
+        state: formData.state,
+        zipCode: formData.zipCode,
+        country: formData.country,
+        cartData: cart,
+        timestamp: new Date().toISOString()
+      };
+      localStorage.setItem('pendingCheckout', JSON.stringify(checkoutData));
+
+      if (exists) {
+        // Email exists - redirect to login
+        window.location.href = `/customer/login?email=${encodeURIComponent(formData.email)}&checkout=true`;
+      } else {
+        // Email doesn't exist - redirect to register
+        window.location.href = `/customer/register?email=${encodeURIComponent(formData.email)}&checkout=true`;
+      }
+    } catch (err) {
+      console.error('[Email Check] Error:', err);
+      setCheckoutError('Error checking email. Please try again.');
+    } finally {
+      setEmailCheckLoading(false);
     }
   };
 
@@ -350,7 +356,6 @@ export default function ProductPage() {
               <span className="hidden sm:inline">Back</span>
             </Link>
             
-            {/* Customer Auth Links */}
             <div className="hidden sm:flex items-center gap-2 ml-4 pl-4 border-l border-slate-600">
               <Link 
                 href="/customer/login" 
@@ -412,10 +417,9 @@ export default function ProductPage() {
                     ) : (
                       <div className="divide-y divide-slate-700">
                         {cart.map((item) => (
-                          <div key={item.cartId} className="p-3 sm:p-4 hover:bg-slate-700/50 transition">
+                          <div key={item.id} className="p-3 sm:p-4 hover:bg-slate-700/50 transition">
                             {/* Product Image & Info */}
                             <div className="flex gap-3 mb-3">
-                              {/* Image */}
                               {item.image && (
                                 <div className="flex-shrink-0">
                                   <img
@@ -430,7 +434,6 @@ export default function ProductPage() {
                               <div className="flex-1 min-w-0">
                                 <h4 className="text-xs sm:text-sm font-semibold text-white line-clamp-2 mb-1">{item.name}</h4>
                                 
-                                {/* Category & Price */}
                                 <div className="space-y-1 mb-2">
                                   {item.category && (
                                     <p className="text-xs text-gray-400">{item.category}</p>
@@ -438,9 +441,8 @@ export default function ProductPage() {
                                   <p className="text-xs sm:text-sm font-bold text-green-400">${parseFloat(item.price || 0).toFixed(2)}</p>
                                 </div>
 
-                                {/* Delete Button */}
                                 <button
-                                  onClick={() => removeFromCart(item.cartId)}
+                                  onClick={() => removeFromCart(item.id)}
                                   className="text-red-400 hover:text-red-300 text-xs flex items-center gap-1 transition"
                                 >
                                   <Trash2 size={12} />
@@ -453,14 +455,14 @@ export default function ProductPage() {
                             <div className="flex items-center justify-between bg-slate-700/30 rounded p-2">
                               <div className="flex items-center gap-2">
                                 <button
-                                  onClick={() => updateCartQuantity(item.cartId, item.quantity - 1)}
+                                  onClick={() => updateCartQuantity(item.id, item.quantity - 1)}
                                   className="text-gray-400 hover:text-white p-1 transition rounded hover:bg-slate-600"
                                 >
                                   <Minus size={14} />
                                 </button>
                                 <span className="text-white font-bold w-6 text-center text-sm">{item.quantity}</span>
                                 <button
-                                  onClick={() => updateCartQuantity(item.cartId, item.quantity + 1)}
+                                  onClick={() => updateCartQuantity(item.id, item.quantity + 1)}
                                   className="text-gray-400 hover:text-white p-1 transition rounded hover:bg-slate-600"
                                 >
                                   <Plus size={14} />
@@ -860,7 +862,7 @@ export default function ProductPage() {
         </div>
       </div>
 
-      {/* CHECKOUT MODAL - SIMPLIFIED EMAIL CHECK */}
+      {/* CHECKOUT MODAL */}
       {showCheckout && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4 overflow-y-auto">
           <div className="w-full max-w-2xl bg-slate-800 rounded-2xl border border-slate-700 shadow-2xl my-8">
