@@ -1,17 +1,151 @@
 'use client';
 
-import { Suspense } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { Check, Package, Truck, Mail } from 'lucide-react';
+import { Check, Package, Truck, Mail, Loader, AlertCircle } from 'lucide-react';
+import { doc, setDoc, getDoc, updateDoc, increment, arrayUnion, collection, query, where, getDocs } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 function SuccessContent() {
   const searchParams = useSearchParams();
   const orderId = searchParams.get('order') || 'Order-' + Math.random().toString(36).substr(2, 9);
+  const [loading, setLoading] = useState(true);
+  const [orderCreated, setOrderCreated] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const syncOrderToCustomer = async () => {
+      try {
+        setLoading(true);
+        
+        // Get cart data
+        const cartData = localStorage.getItem('shoppingCart');
+        const customerData = localStorage.getItem('customer');
+
+        if (!cartData || !customerData) {
+          console.log('[Success] No cart or customer data, skipping order sync');
+          setOrderCreated(true);
+          setLoading(false);
+          return;
+        }
+
+        const cart = JSON.parse(cartData);
+        const customer = JSON.parse(customerData);
+
+        if (cart.length === 0) {
+          console.log('[Success] Empty cart, skipping order sync');
+          setOrderCreated(true);
+          setLoading(false);
+          return;
+        }
+
+        const customerId = customer.id;
+        const customerEmail = customer.email;
+
+        console.log('[Success] Creating order for customer:', customerId);
+
+        // Calculate totals from cart
+        const subtotal = parseFloat(cart.reduce((sum, item) => sum + (item.price * item.quantity), 0).toFixed(2));
+        const shipping = 10.00;
+        const tax = parseFloat((subtotal * 0.08).toFixed(2));
+        const total = parseFloat((subtotal + shipping + tax).toFixed(2));
+
+        // Create order document
+        const orderData = {
+          customerId: customerId,
+          customerEmail: customerEmail,
+          customerName: customer.firstName + ' ' + customer.lastName,
+          customerPhone: customer.phone || '',
+          items: cart.map(item => ({
+            productId: item.id,
+            name: item.name,
+            price: parseFloat(item.price),
+            quantity: item.quantity,
+            image: item.image || '',
+            category: item.category || ''
+          })),
+          subtotal: subtotal,
+          shipping: shipping,
+          tax: tax,
+          total: total,
+          discount: 0,
+          coupon_code: null,
+          status: 'paid',
+          payment_method: 'stripe',
+          payment_intent_id: orderId,
+          tracking_number: null,
+          shipping_carrier: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        // Save order to Firestore
+        const orderRef = doc(db, 'orders', orderId);
+        await setDoc(orderRef, orderData);
+        console.log('✅ Order created in Firestore:', orderId);
+
+        // Update customer document
+        const customerRef = doc(db, 'customers', customerId);
+        const customerDoc = await getDoc(customerRef);
+
+        if (customerDoc.exists()) {
+          await updateDoc(customerRef, {
+            order_count: increment(1),
+            clv: increment(total),
+            total_spent: increment(total),
+            last_order_date: new Date().toISOString(),
+            orders: arrayUnion(orderId)
+          });
+          console.log('✅ Customer stats updated');
+        }
+
+        // Update localStorage customer
+        const updatedCustomer = {
+          ...customer,
+          order_count: (customer.order_count || 0) + 1,
+          clv: (customer.clv || 0) + total,
+          total_spent: (customer.total_spent || 0) + total
+        };
+        localStorage.setItem('customer', JSON.stringify(updatedCustomer));
+
+        // Clear cart
+        localStorage.removeItem('shoppingCart');
+        console.log('✅ Cart cleared, order synced to customer dashboard');
+
+        setOrderCreated(true);
+      } catch (err) {
+        console.error('[Success] Error:', err);
+        setError(err.message || 'Failed to sync order');
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    syncOrderToCustomer();
+  }, [orderId]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-6">
       <div className="max-w-2xl w-full space-y-8">
+        {loading ? (
+          <div className="flex flex-col items-center justify-center py-12">
+            <Loader size={40} className="text-blue-500 animate-spin mb-4" />
+            <p className="text-gray-400">Processing your order...</p>
+          </div>
+        ) : error ? (
+          <div className="bg-red-900/30 border border-red-500 rounded-lg p-6">
+            <div className="flex items-start gap-4">
+              <AlertCircle size={24} className="text-red-400 flex-shrink-0 mt-1" />
+              <div>
+                <h2 className="text-xl font-bold text-white mb-2">Order Processing Note</h2>
+                <p className="text-gray-300 mb-4">{error}</p>
+                <p className="text-gray-400 text-sm">Your payment was successful, but we couldn't sync your order. You can view it in your account shortly.</p>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {/* Success Message */}
         <div className="text-center space-y-4">
           <div className="flex justify-center mb-6">
@@ -31,6 +165,9 @@ function SuccessContent() {
             <p className="text-gray-400 text-sm mt-1">
               Order ID: <span className="font-mono text-white">{orderId}</span>
             </p>
+            {orderCreated && (
+              <p className="text-green-300 text-sm mt-2">✅ Order synced to your dashboard</p>
+            )}
           </div>
         </div>
 
@@ -108,7 +245,7 @@ function SuccessContent() {
           <div className="space-y-6">
             <div>
               <h3 className="text-white font-semibold mb-2">How do I track my order?</h3>
-              <p className="text-gray-400">You'll receive a tracking number via email once your order ships. You can use it to track your package in real-time.</p>
+              <p className="text-gray-400">You'll receive a tracking number via email once your order ships. You can also view your order in your account dashboard.</p>
             </div>
 
             <div>
@@ -130,9 +267,15 @@ function SuccessContent() {
 
         {/* Action Buttons */}
         <div className="flex gap-4 flex-wrap justify-center">
+          <Link
+            href="/customer/account"
+            className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition"
+          >
+            View My Orders
+          </Link>
           <a
             href="mailto:support@dropshipwithmonk.sbs"
-            className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition"
+            className="inline-block bg-slate-700 hover:bg-slate-600 text-white px-6 py-3 rounded-lg font-semibold transition"
           >
             Contact Support
           </a>
