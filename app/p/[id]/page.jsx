@@ -5,29 +5,38 @@ import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { doc, getDoc, addDoc, collection, getDocs, updateDoc, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { ArrowLeft, Star, ShoppingCart, Heart, Copy, Check, Truck, Shield, RefreshCw, Mail, AlertCircle, Loader, X, Plus, Minus, TrendingUp, Eye, Zap, Lock, Trash2 } from 'lucide-react';
+import { ArrowLeft, Star, ShoppingCart, Heart, Copy, Check, Truck, Shield, RefreshCw, Mail, AlertCircle, Loader, X, Plus, Minus, TrendingUp, Eye, Zap, Lock, Trash2, LogOut, User } from 'lucide-react';
 
-// Use same key as checkout page expects
 const CART_STORAGE_KEY = 'cart';
 
 export default function ProductPage() {
   const params = useParams();
   const router = useRouter();
   const cartRef = useRef(null);
+  
+  // Customer state
+  const [customer, setCustomer] = useState(null);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  
+  // Product state
   const [product, setProduct] = useState(null);
   const [relatedProducts, setRelatedProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  
+  // Cart state
   const [quantity, setQuantity] = useState(1);
+  const [cart, setCart] = useState([]);
+  const [showCartDropdown, setShowCartDropdown] = useState(false);
+  const [cartLoaded, setCartLoaded] = useState(false);
+  
+  // UI state
   const [liked, setLiked] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showCheckout, setShowCheckout] = useState(false);
-  const [activeTab, setActiveTab] = useState('details');
-  const [cart, setCart] = useState([]);
-  const [showCartDropdown, setShowCartDropdown] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [activeTab, setActiveTab] = useState('details');
   const [checkoutError, setCheckoutError] = useState(null);
-  const [cartLoaded, setCartLoaded] = useState(false);
   const [emailCheckLoading, setEmailCheckLoading] = useState(false);
   const [formErrors, setFormErrors] = useState({});
   
@@ -42,11 +51,43 @@ export default function ProductPage() {
     country: 'United States',
   });
 
+  // CHECK IF USER IS LOGGED IN ON MOUNT
+  useEffect(() => {
+    const checkLoginStatus = () => {
+      if (typeof window !== 'undefined') {
+        try {
+          const customerData = localStorage.getItem('customer');
+          if (customerData) {
+            const parsedCustomer = JSON.parse(customerData);
+            console.log('[Product] Customer found:', parsedCustomer.email);
+            setCustomer(parsedCustomer);
+            setIsLoggedIn(true);
+            
+            // Auto-fill form with customer data
+            setFormData(prev => ({
+              ...prev,
+              email: parsedCustomer.email || '',
+              fullName: `${parsedCustomer.firstName || ''} ${parsedCustomer.lastName || ''}`.trim(),
+              phone: parsedCustomer.phone || '',
+            }));
+          } else {
+            console.log('[Product] No customer found');
+            setIsLoggedIn(false);
+          }
+        } catch (err) {
+          console.error('[Product] Error checking login status:', err);
+          setIsLoggedIn(false);
+        }
+      }
+    };
+
+    checkLoginStatus();
+  }, []);
+
   // Load cart from localStorage on mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
       try {
-        // Check both old and new keys for backwards compatibility
         const savedCart = localStorage.getItem(CART_STORAGE_KEY) || localStorage.getItem('shoppingCart');
         if (savedCart) {
           const parsedCart = JSON.parse(savedCart);
@@ -90,6 +131,7 @@ export default function ProductPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Load product
   useEffect(() => {
     const loadProduct = async () => {
       try {
@@ -182,7 +224,6 @@ export default function ProductPage() {
       return;
     }
 
-    // Ensure all required fields are present and correct types
     const cartItem = {
       id: String(itemToAdd.id),
       productId: String(itemToAdd.productId || itemToAdd.id),
@@ -241,13 +282,103 @@ export default function ProductPage() {
     setCart([]);
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem('customer');
+    localStorage.removeItem('customerToken');
+    setCustomer(null);
+    setIsLoggedIn(false);
+    setFormData({
+      email: '',
+      fullName: '',
+      phone: '',
+      address: '',
+      city: '',
+      state: '',
+      zipCode: '',
+      country: 'United States',
+    });
+  };
+
   const cartTotal = cart.reduce((sum, item) => sum + (parseFloat(item.price || 0) * item.quantity), 0);
   const cartItemCount = cart.reduce((sum, item) => sum + item.quantity, 0);
   const shipping = 10.00;
   const tax = parseFloat((cartTotal * 0.08).toFixed(2));
   const grandTotal = parseFloat((cartTotal + shipping + tax).toFixed(2));
 
-  // Email check and redirect flow
+  // Checkout handler - UPDATED TO HANDLE LOGGED IN USERS
+  const handleCheckout = async (e) => {
+    e.preventDefault();
+
+    if (isLoggedIn && customer) {
+      // User is logged in - proceed directly to Stripe checkout
+      console.log('[Checkout] User is logged in, proceeding to Stripe...');
+      await proceedToStripeCheckout();
+    } else {
+      // User not logged in - show email verification
+      await handleEmailCheck(e);
+    }
+  };
+
+  // New function to handle Stripe checkout directly
+  const proceedToStripeCheckout = async () => {
+    try {
+      setCheckoutError(null);
+      setEmailCheckLoading(true);
+
+      console.log('[Checkout] Proceeding with customer:', customer.email);
+
+      // Calculate totals
+      const subtotal = cartTotal;
+      const tax = parseFloat((cartTotal * 0.08).toFixed(2));
+      const total = parseFloat((cartTotal + shipping + tax).toFixed(2));
+
+      // Call checkout API
+      const response = await fetch('/api/stripe/checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          cartItems: cart,
+          customer: {
+            id: customer.id,
+            email: customer.email,
+            firstName: customer.firstName,
+            lastName: customer.lastName,
+            phone: customer.phone,
+          },
+          subtotal: subtotal,
+          tax: tax,
+          total: total,
+          shippingAddress: formData,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.sessionId) {
+        console.log('[Checkout] Session created:', data.sessionId);
+        
+        // Redirect to Stripe checkout
+        const stripe = await (await import('@stripe/stripe-js')).loadStripe(
+          process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+        );
+        
+        if (stripe) {
+          await stripe.redirectToCheckout({ sessionId: data.sessionId });
+        }
+      } else {
+        setCheckoutError(data.error || 'Checkout failed');
+      }
+    } catch (err) {
+      console.error('[Checkout] Error:', err);
+      setCheckoutError('Error processing checkout. Please try again.');
+    } finally {
+      setEmailCheckLoading(false);
+    }
+  };
+
+  // Email check for non-logged-in users
   const handleEmailCheck = async (e) => {
     e.preventDefault();
     
@@ -266,7 +397,7 @@ export default function ProductPage() {
       
       const exists = !querySnapshot.empty;
 
-      // Save checkout data to localStorage before redirecting
+      // Save checkout data
       const checkoutData = {
         email: formData.email,
         fullName: formData.fullName,
@@ -282,10 +413,8 @@ export default function ProductPage() {
       localStorage.setItem('pendingCheckout', JSON.stringify(checkoutData));
 
       if (exists) {
-        // Email exists - redirect to login
         window.location.href = `/customer/login?email=${encodeURIComponent(formData.email)}&checkout=true`;
       } else {
-        // Email doesn't exist - redirect to register
         window.location.href = `/customer/register?email=${encodeURIComponent(formData.email)}&checkout=true`;
       }
     } catch (err) {
@@ -356,23 +485,44 @@ export default function ProductPage() {
               <span className="hidden sm:inline">Back</span>
             </Link>
             
-            <div className="hidden sm:flex items-center gap-2 ml-4 pl-4 border-l border-slate-600">
-              <Link 
-                href="/customer/login" 
-                className="text-gray-400 hover:text-white text-sm font-medium transition"
-              >
-                Login
-              </Link>
-              <span className="text-gray-600">•</span>
-              <Link 
-                href="/customer/register" 
-                className="text-blue-400 hover:text-blue-300 text-sm font-medium transition"
-              >
-                Register
-              </Link>
-            </div>
+            {/* Customer Status */}
+            {isLoggedIn && customer && (
+              <div className="hidden sm:flex items-center gap-2 ml-4 pl-4 border-l border-slate-600">
+                <div className="flex items-center gap-2 px-3 py-1 bg-green-600/20 rounded-full">
+                  <User size={14} className="text-green-400" />
+                  <span className="text-green-400 text-xs font-semibold">Logged in as {customer.firstName}</span>
+                </div>
+                <button
+                  onClick={handleLogout}
+                  className="text-gray-400 hover:text-red-400 text-xs flex items-center gap-1 transition"
+                >
+                  <LogOut size={14} />
+                  Logout
+                </button>
+              </div>
+            )}
+            
+            {!isLoggedIn && (
+              <div className="hidden sm:flex items-center gap-2 ml-4 pl-4 border-l border-slate-600">
+                <Link 
+                  href="/customer/login" 
+                  className="text-gray-400 hover:text-white text-sm font-medium transition"
+                >
+                  Login
+                </Link>
+                <span className="text-gray-600">•</span>
+                <Link 
+                  href="/customer/register" 
+                  className="text-blue-400 hover:text-blue-300 text-sm font-medium transition"
+                >
+                  Register
+                </Link>
+              </div>
+            )}
           </div>
+          
           <h1 className="text-base sm:text-lg font-bold text-white">🛍️ Product</h1>
+          
           <div className="flex items-center gap-2 sm:gap-4 relative">
             {/* Cart Button */}
             <div ref={cartRef} className="relative">
@@ -389,7 +539,7 @@ export default function ProductPage() {
                 )}
               </button>
 
-              {/* Dropdown */}
+              {/* Cart Dropdown */}
               {showCartDropdown && (
                 <div className="absolute right-0 top-full mt-2 w-80 sm:w-96 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden z-50 animate-in fade-in slide-in-from-top-2">
                   {/* Header */}
@@ -418,7 +568,6 @@ export default function ProductPage() {
                       <div className="divide-y divide-slate-700">
                         {cart.map((item) => (
                           <div key={item.id} className="p-3 sm:p-4 hover:bg-slate-700/50 transition">
-                            {/* Product Image & Info */}
                             <div className="flex gap-3 mb-3">
                               {item.image && (
                                 <div className="flex-shrink-0">
@@ -430,7 +579,6 @@ export default function ProductPage() {
                                 </div>
                               )}
 
-                              {/* Details */}
                               <div className="flex-1 min-w-0">
                                 <h4 className="text-xs sm:text-sm font-semibold text-white line-clamp-2 mb-1">{item.name}</h4>
                                 
@@ -451,7 +599,6 @@ export default function ProductPage() {
                               </div>
                             </div>
 
-                            {/* Quantity & Subtotal */}
                             <div className="flex items-center justify-between bg-slate-700/30 rounded p-2">
                               <div className="flex items-center gap-2">
                                 <button
@@ -872,7 +1019,9 @@ export default function ProductPage() {
                 <Lock size={24} className="text-white flex-shrink-0" />
                 <div className="min-w-0">
                   <h2 className="text-xl sm:text-2xl lg:text-3xl font-bold text-white truncate">Checkout</h2>
-                  <p className="text-blue-100 text-xs sm:text-sm">Step 1: Verify Email</p>
+                  <p className="text-blue-100 text-xs sm:text-sm">
+                    {isLoggedIn ? 'Proceeding to Payment' : 'Step 1: Verify Email'}
+                  </p>
                 </div>
               </div>
               <button
@@ -892,45 +1041,136 @@ export default function ProductPage() {
                 </div>
               )}
 
-              <form onSubmit={handleEmailCheck} className="space-y-4 sm:space-y-6 max-w-md">
-                <div>
-                  <label className="block text-xs sm:text-sm text-gray-300 mb-1.5 sm:mb-2 font-semibold">Email Address</label>
-                  <p className="text-xs text-gray-400 mb-2">We'll check if you have an account with us</p>
-                  <input
-                    type="email"
-                    name="email"
-                    placeholder="you@example.com"
-                    value={formData.email}
-                    onChange={handleInputChange}
-                    className={`w-full px-3 sm:px-4 py-3 bg-slate-700 text-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
-                      formErrors.email ? 'border-red-500' : 'border-slate-600'
-                    }`}
-                  />
-                  {formErrors.email && <p className="text-red-400 text-xs mt-1">{formErrors.email}</p>}
-                </div>
+              {isLoggedIn && customer ? (
+                // LOGGED IN - Show form auto-filled
+                <form onSubmit={handleCheckout} className="space-y-4 sm:space-y-6 max-w-2xl">
+                  {/* Customer Info Display */}
+                  <div className="bg-green-900/20 border border-green-500/30 rounded-lg p-3 sm:p-4">
+                    <div className="flex items-start gap-2">
+                      <Check size={18} className="text-green-400 flex-shrink-0 mt-0.5" />
+                      <div className="min-w-0">
+                        <p className="text-green-300 font-semibold text-sm">Logged in as</p>
+                        <p className="text-green-200 text-xs sm:text-sm">{customer.email}</p>
+                        <p className="text-green-200 text-xs">{customer.firstName} {customer.lastName}</p>
+                      </div>
+                    </div>
+                  </div>
 
-                <button
-                  type="submit"
-                  disabled={emailCheckLoading}
-                  className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:from-gray-600 disabled:to-gray-600 text-white py-3 rounded-lg font-bold text-base transition flex items-center justify-center gap-2"
-                >
-                  {emailCheckLoading ? (
-                    <>
-                      <Loader size={18} className="animate-spin" />
-                      <span>Checking...</span>
-                    </>
-                  ) : (
-                    <>
-                      <Mail size={18} />
-                      Continue
-                    </>
-                  )}
-                </button>
+                  {/* Shipping Address Form */}
+                  <div className="space-y-4">
+                    <h3 className="font-bold text-white">Shipping Address</h3>
+                    
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                      <div>
+                        <label className="block text-xs sm:text-sm text-gray-300 mb-1.5 font-semibold">Address</label>
+                        <input
+                          type="text"
+                          name="address"
+                          placeholder="123 Main St"
+                          value={formData.address}
+                          onChange={handleInputChange}
+                          className="w-full px-3 sm:px-4 py-3 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                        />
+                      </div>
 
-                <p className="text-xs text-gray-400 text-center">
-                  ✅ Your data is secure
-                </p>
-              </form>
+                      <div>
+                        <label className="block text-xs sm:text-sm text-gray-300 mb-1.5 font-semibold">City</label>
+                        <input
+                          type="text"
+                          name="city"
+                          placeholder="New York"
+                          value={formData.city}
+                          onChange={handleInputChange}
+                          className="w-full px-3 sm:px-4 py-3 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs sm:text-sm text-gray-300 mb-1.5 font-semibold">State</label>
+                        <input
+                          type="text"
+                          name="state"
+                          placeholder="NY"
+                          value={formData.state}
+                          onChange={handleInputChange}
+                          className="w-full px-3 sm:px-4 py-3 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-xs sm:text-sm text-gray-300 mb-1.5 font-semibold">Zip Code</label>
+                        <input
+                          type="text"
+                          name="zipCode"
+                          placeholder="10001"
+                          value={formData.zipCode}
+                          onChange={handleInputChange}
+                          className="w-full px-3 sm:px-4 py-3 bg-slate-700 text-white border border-slate-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={emailCheckLoading}
+                    className="w-full bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 disabled:from-gray-600 disabled:to-gray-600 text-white py-3 rounded-lg font-bold text-base transition flex items-center justify-center gap-2"
+                  >
+                    {emailCheckLoading ? (
+                      <>
+                        <Loader size={18} className="animate-spin" />
+                        <span>Processing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Zap size={18} />
+                        Proceed to Payment
+                      </>
+                    )}
+                  </button>
+                </form>
+              ) : (
+                // NOT LOGGED IN - Email verification form
+                <form onSubmit={handleCheckout} className="space-y-4 sm:space-y-6 max-w-md">
+                  <div>
+                    <label className="block text-xs sm:text-sm text-gray-300 mb-1.5 sm:mb-2 font-semibold">Email Address</label>
+                    <p className="text-xs text-gray-400 mb-2">We'll check if you have an account with us</p>
+                    <input
+                      type="email"
+                      name="email"
+                      placeholder="you@example.com"
+                      value={formData.email}
+                      onChange={handleInputChange}
+                      className={`w-full px-3 sm:px-4 py-3 bg-slate-700 text-white border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm ${
+                        formErrors.email ? 'border-red-500' : 'border-slate-600'
+                      }`}
+                    />
+                    {formErrors.email && <p className="text-red-400 text-xs mt-1">{formErrors.email}</p>}
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={emailCheckLoading}
+                    className="w-full bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 disabled:from-gray-600 disabled:to-gray-600 text-white py-3 rounded-lg font-bold text-base transition flex items-center justify-center gap-2"
+                  >
+                    {emailCheckLoading ? (
+                      <>
+                        <Loader size={18} className="animate-spin" />
+                        <span>Checking...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Mail size={18} />
+                        Continue
+                      </>
+                    )}
+                  </button>
+
+                  <p className="text-xs text-gray-400 text-center">
+                    ✅ Your data is secure
+                  </p>
+                </form>
+              )}
 
               {/* Order Summary */}
               <div className="mt-8 pt-8 border-t border-slate-700">
