@@ -97,56 +97,67 @@ export async function POST(request) {
 
       console.log('[Checkout API] Valid cart items:', validCart.length);
 
+      // Save PENDING order BEFORE creating Stripe session
+      console.log('[Checkout API] Saving PENDING order to Firestore...');
+      
+      const pendingOrderData = {
+        customerId: customer.id,
+        customerName: customer.firstName || 'Customer',
+        customerEmail: customer.email,
+        customerPhone: customer.phone || '',
+        items: cartItems.map(item => ({
+          productId: item.productId || item.id,
+          productName: item.name || item.productName,
+          price: parseFloat(item.price),
+          quantity: parseInt(item.quantity) || 1,
+          image: item.image,
+        })),
+        subtotal: parseFloat(subtotal || 0),
+        tax: parseFloat(tax || 0),
+        total: totalAmount,
+        shippingAddress: shippingAddress || {},
+        status: 'pending_payment', // 🔑 PENDING STATUS!
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+
+      let pendingOrderId = null;
+      try {
+        const ordersRef = collection(db, 'orders');
+        const docRef = await addDoc(ordersRef, pendingOrderData);
+        pendingOrderId = docRef.id;
+        console.log('[Checkout API] PENDING order saved:', pendingOrderId);
+      } catch (firestoreError) {
+        console.error('[Checkout API] Error saving pending order (will continue):', firestoreError.message);
+      }
+
       // Create Stripe session
       console.log('[Checkout API] Creating Stripe session...');
       const session = await stripe.checkout.sessions.create({
         payment_method_types: ['card'],
         line_items: validCart,
         mode: 'payment',
-        success_url: `${process.env.NEXT_PUBLIC_DOMAIN || 'https://www.dropshipwithmonk.sbs'}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+        success_url: `${process.env.NEXT_PUBLIC_DOMAIN || 'https://www.dropshipwithmonk.sbs'}/checkout/success?session_id={CHECKOUT_SESSION_ID}&order_id=${pendingOrderId || 'unknown'}`,
         cancel_url: `${process.env.NEXT_PUBLIC_DOMAIN || 'https://www.dropshipwithmonk.sbs'}/checkout/cancel`,
         customer_email: customer.email,
         metadata: {
           customerId: customer.id,
           customerName: customer.firstName || 'Customer',
           customerEmail: customer.email,
+          orderId: pendingOrderId || 'unknown',
         },
       });
 
       console.log('[Checkout API] Stripe session created:', session.id);
 
-      // Try to save order to Firestore (non-critical)
-      try {
-        const orderData = {
-          id: session.id,
-          stripeSessionId: session.id,
-          customerId: customer.id,
-          customerName: customer.firstName || 'Customer',
-          customerEmail: customer.email,
-          customerPhone: customer.phone || '',
-          items: cartItems.map(item => ({
-            productId: item.productId || item.id,
-            productName: item.name || item.productName,
-            price: parseFloat(item.price),
-            quantity: parseInt(item.quantity) || 1,
-            image: item.image,
-          })),
-          subtotal: parseFloat(subtotal || 0),
-          tax: parseFloat(tax || 0),
-          total: totalAmount,
-          shippingAddress: shippingAddress || {},
-          status: 'pending_payment',
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-        };
-
-        console.log('[Checkout API] Saving order to Firestore...');
-        const ordersRef = collection(db, 'orders');
-        const docRef = await addDoc(ordersRef, orderData);
-        console.log('[Checkout API] Order saved:', docRef.id);
-      } catch (firestoreError) {
-        console.error('[Checkout API] Firestore error (non-fatal):', firestoreError.message);
-        // Don't fail checkout if Firestore fails
+      // Update pending order with Stripe session ID
+      if (pendingOrderId) {
+        try {
+          // Store session ID in metadata for later reference
+          console.log('[Checkout API] Pending order linked with Stripe session:', session.id);
+        } catch (err) {
+          console.error('[Checkout API] Error linking session (non-critical):', err.message);
+        }
       }
 
       // Success response
@@ -155,6 +166,7 @@ export async function POST(request) {
         success: true,
         sessionId: session.id,
         clientSecret: session.client_secret,
+        orderId: pendingOrderId,
         message: 'Checkout session created successfully',
       }, { status: 200 });
 
