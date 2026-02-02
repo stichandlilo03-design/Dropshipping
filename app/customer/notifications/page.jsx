@@ -419,7 +419,7 @@ function NotificationsContent() {
             <h3 className="text-xl font-bold text-white mb-2">No Notifications</h3>
             <p className="text-gray-400 mb-6">
               {filterType === 'all'
-                ? 'You're all caught up! No new notifications.'
+                ? "You're all caught up! No new notifications."
                 : `No ${getTypeLabel(filterType).toLowerCase()} found.`}
             </p>
             {filterType !== 'all' && (
@@ -454,3 +454,4 @@ export default function NotificationsPage() {
       <NotificationsContent />
     </Suspense>
   );
+}
