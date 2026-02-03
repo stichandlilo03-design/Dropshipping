@@ -41,7 +41,7 @@ function LoginContent() {
     setPageLoading(false);
   }, [isCheckout, urlEmail, router]);
 
-  // Function to sync cart from Firestore
+  // Function to sync cart from Firestore (ONLY if cart exists)
   const syncCartFromFirestore = async (userId) => {
     try {
       const cartDocRef = doc(db, 'customers', userId, 'cart', 'items');
@@ -51,11 +51,20 @@ function LoginContent() {
         const cartData = cartSnap.data();
         const items = cartData.items || [];
 
+        // Only load if items exist in Firestore (user didn't clear it)
         if (items.length > 0) {
           console.log('[Login] Cart synced from Firestore:', items);
           localStorage.setItem('cart', JSON.stringify(items));
           return items;
+        } else {
+          // Cart exists but is empty (user cleared it)
+          console.log('[Login] Cart in Firestore is empty (user cleared it)');
+          localStorage.removeItem('cart');
         }
+      } else {
+        // No cart in Firestore - user hasn't added anything or cleared it
+        console.log('[Login] No cart found in Firestore');
+        localStorage.removeItem('cart');
       }
     } catch (err) {
       console.error('[Login] Error syncing cart from Firestore:', err);
