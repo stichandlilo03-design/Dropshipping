@@ -20,46 +20,82 @@ function CheckoutContent() {
   const SHIPPING_COST = 10.0;
   const TAX_RATE = 0.08;
 
-  // Load cart from Firestore
-  const loadCartFromFirestore = async (customerId) => {
+  // Load cart - try Firestore first, then localStorage
+  const loadCart = async (customerId) => {
     try {
-      if (!customerId) return;
-      
-      const cartRef = doc(db, 'customers', customerId, 'cart', 'items');
-      const cartSnap = await getDoc(cartRef);
-      
-      if (cartSnap.exists()) {
-        const cartData = cartSnap.data();
-        const items = cartData.items || [];
-        if (items.length > 0) {
-          setCart(items);
-          localStorage.setItem('cart', JSON.stringify(items));
-          console.log('[Checkout] Cart loaded from Firestore:', items);
-        } else {
-          setCart([]);
-          localStorage.removeItem('cart');
+      // TRY 1: Load from Firestore nested path
+      try {
+        const cartRef = doc(db, 'customers', customerId, 'cart', 'items');
+        const cartSnap = await getDoc(cartRef);
+        
+        if (cartSnap.exists()) {
+          const cartData = cartSnap.data();
+          const items = cartData.items || [];
+          if (items.length > 0) {
+            console.log('[Checkout] ✅ Cart loaded from Firestore nested path:', items);
+            setCart(items);
+            localStorage.setItem('cart', JSON.stringify(items));
+            return;
+          }
         }
-      } else {
-        setCart([]);
-        localStorage.removeItem('cart');
+      } catch (err) {
+        console.log('[Checkout] Firestore nested path not found, trying document path...');
       }
-    } catch (err) {
-      console.error('[Checkout] Error loading cart from Firestore:', err);
-      // Fallback to localStorage
-      loadCartFromLocalStorage();
-    }
-  };
 
-  // Load cart from localStorage
-  const loadCartFromLocalStorage = () => {
-    try {
+      // TRY 2: Load from direct Firestore document
+      try {
+        const cartDocRef = doc(db, 'customers', customerId, 'cart', 'items');
+        const docSnap = await getDoc(cartDocRef);
+        
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          const items = Array.isArray(data) ? data : data.items || [];
+          if (items.length > 0) {
+            console.log('[Checkout] ✅ Cart loaded from direct document:', items);
+            setCart(items);
+            localStorage.setItem('cart', JSON.stringify(items));
+            return;
+          }
+        }
+      } catch (err) {
+        console.log('[Checkout] Direct document path failed');
+      }
+
+      // TRY 3: Fallback to localStorage
+      console.log('[Checkout] No cart in Firestore, loading from localStorage...');
       const cartData = localStorage.getItem('cart');
       if (cartData) {
-        const parsedCart = JSON.parse(cartData);
-        setCart(Array.isArray(parsedCart) ? parsedCart : []);
+        try {
+          const parsedCart = JSON.parse(cartData);
+          if (Array.isArray(parsedCart) && parsedCart.length > 0) {
+            console.log('[Checkout] ✅ Cart loaded from localStorage:', parsedCart);
+            setCart(parsedCart);
+            
+            // TRY TO SAVE TO FIRESTORE
+            try {
+              const cartRef = doc(db, 'customers', customerId, 'cart', 'items');
+              await setDoc(cartRef, {
+                items: parsedCart,
+                lastUpdated: new Date().toISOString(),
+                total: parsedCart.reduce((sum, item) => sum + (parseFloat(item.price || 0) * item.quantity), 0),
+                itemCount: parsedCart.length,
+              }, { merge: true });
+              console.log('[Checkout] ✅ Cart saved from localStorage to Firestore');
+            } catch (saveErr) {
+              console.error('[Checkout] Could not save to Firestore:', saveErr);
+            }
+            return;
+          }
+        } catch (parseErr) {
+          console.error('[Checkout] Error parsing localStorage cart:', parseErr);
+        }
       }
-    } catch (e) {
-      console.error('[Checkout] Error parsing cart:', e);
+
+      // No cart found anywhere
+      console.log('[Checkout] No cart found');
+      setCart([]);
+    } catch (err) {
+      console.error('[Checkout] Error loading cart:', err);
       setCart([]);
     }
   };
@@ -68,62 +104,71 @@ function CheckoutContent() {
     const customerData = localStorage.getItem('customer');
 
     if (!customerData) {
+      console.log('[Checkout] No customer data, redirecting to login');
       router.push('/customer/login');
       return;
     }
 
-    const parsedCustomer = JSON.parse(customerData);
-    setCustomer(parsedCustomer);
-    
-    // Load cart from Firestore if logged in, fallback to localStorage
-    if (parsedCustomer.id) {
-      loadCartFromFirestore(parsedCustomer.id);
-    } else {
-      loadCartFromLocalStorage();
+    try {
+      const parsedCustomer = JSON.parse(customerData);
+      setCustomer(parsedCustomer);
+      
+      // Load cart from Firestore/localStorage
+      if (parsedCustomer.id) {
+        loadCart(parsedCustomer.id);
+      }
+    } catch (err) {
+      console.error('[Checkout] Error parsing customer:', err);
+      router.push('/customer/login');
     }
     
     setLoading(false);
   }, [router]);
 
-  // Save cart to both localStorage and Firestore
+  // Save cart to both localStorage and Firestore whenever it changes
   useEffect(() => {
-    if (!customer) return;
+    if (!customer || !customer.id) return;
 
-    const saveCart = async () => {
+    const saveCartAsync = async () => {
       try {
         // Save to localStorage
         if (cart.length > 0) {
           localStorage.setItem('cart', JSON.stringify(cart));
+          console.log('[Checkout] Cart saved to localStorage');
         } else {
           localStorage.removeItem('cart');
+          console.log('[Checkout] Cart cleared from localStorage');
         }
 
         // Save to Firestore
         const cartDocRef = doc(db, 'customers', customer.id, 'cart', 'items');
         
         if (cart.length > 0) {
-          await setDoc(cartDocRef, {
+          const cartData = {
             items: cart,
             lastUpdated: new Date().toISOString(),
             total: cart.reduce((sum, item) => sum + (parseFloat(item.price || 0) * item.quantity), 0),
             itemCount: cart.length,
-          }, { merge: true });
-          console.log('[Checkout] Cart saved to Firestore');
+          };
+          
+          await setDoc(cartDocRef, cartData, { merge: true });
+          console.log('[Checkout] Cart saved to Firestore:', cartData);
         } else {
-          // DELETE from Firestore when cart is cleared
+          // Delete from Firestore when cart is empty
           try {
             await deleteDoc(cartDocRef);
-            console.log('[Checkout] Cart deleted from Firestore (cart cleared)');
-          } catch (e) {
+            console.log('[Checkout] Cart deleted from Firestore');
+          } catch (deleteErr) {
             console.log('[Checkout] Cart already deleted or does not exist');
           }
         }
       } catch (err) {
-        console.error('[Checkout] Error saving cart:', err);
+        console.error('[Checkout] Error saving cart to Firestore:', err);
+        // Don't fail checkout if Firestore fails
       }
     };
 
-    saveCart();
+    saveCartAsync();
   }, [cart, customer]);
 
   // Calculate amounts
@@ -191,7 +236,8 @@ function CheckoutContent() {
       setLoading(true);
       setError(null);
 
-      console.log('[Checkout] Sending amounts to API:', amounts);
+      console.log('[Checkout] Processing order with cart:', cart);
+      console.log('[Checkout] Amount details:', amounts);
 
       const response = await fetch('/api/stripe/checkout', {
         method: 'POST',
@@ -203,8 +249,9 @@ function CheckoutContent() {
           customer: {
             id: customer.id,
             email: customer.email,
-            firstName: customer.firstName,
-            phone: customer.phone,
+            firstName: customer.firstName || 'Customer',
+            lastName: customer.lastName || '',
+            phone: customer.phone || '',
           },
           subtotal: amounts.subtotal,
           tax: amounts.tax,
