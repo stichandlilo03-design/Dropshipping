@@ -29,7 +29,7 @@ function LoginContent() {
 
     const customerData = localStorage.getItem('customer');
     if (customerData) {
-      console.log('[Login] Already logged in, redirecting...');
+      console.log('[Login] Already logged in as customer, redirecting...');
       if (isCheckout) {
         router.push('/checkout');
       } else {
@@ -52,7 +52,7 @@ function LoginContent() {
         const items = cartData.items || [];
 
         if (items.length > 0) {
-          console.log('[Login] Cart synced from Firestore:', items);
+          console.log('[Login] Syncing cart from Firestore:', items);
           localStorage.setItem('cart', JSON.stringify(items));
           return items;
         } else {
@@ -81,6 +81,7 @@ function LoginContent() {
       setLoading(true);
       setError('');
 
+      console.log('[Login] ===== CUSTOMER LOGIN STARTED =====');
       console.log('[Login] Attempting login with:', email);
 
       // Sign in with Firebase
@@ -89,59 +90,37 @@ function LoginContent() {
 
       console.log('[Login] User signed in:', user.uid);
 
+      // ✅ STEP 1: CHECK IF USER IS IN CUSTOMERS COLLECTION
+      console.log('[Login] Step 1: Checking if user is in customers collection...');
+      const customerRef = doc(db, 'customers', user.uid);
+      const customerSnap = await getDoc(customerRef);
+
+      if (!customerSnap.exists()) {
+        console.error('[Login] ❌ User NOT found in customers collection - this is an admin account!');
+        setError('❌ This account is registered as an ADMIN, not a customer.\n\nPlease use the admin login page.');
+        setLoading(false);
+        return;
+      }
+
+      console.log('[Login] ✅ User confirmed in customers collection');
+
       // Get user token
       const token = await user.getIdToken();
+      console.log('[Login] Token obtained');
 
-      console.log('[Login] Token obtained, fetching profile from API...');
-
-      // ✅ FETCH FROM API
-      const apiResponse = await fetch('/api/customers/profile', {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'X-User-ID': user.uid,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      let customerData = null;
-
-      if (apiResponse.ok) {
-        customerData = await apiResponse.json();
-        console.log('[Login] ✅ API returned customer data:', customerData);
-      } else {
-        console.log('[Login] ⚠️ API returned error, checking Firestore directly...');
-        
-        // Fallback: Get from Firestore directly
-        const customerRef = doc(db, 'customers', user.uid);
-        const customerSnap = await getDoc(customerRef);
-
-        if (customerSnap.exists()) {
-          customerData = customerSnap.data();
-          console.log('[Login] ✅ Got customer from Firestore:', customerData);
-        } else {
-          customerData = {
-            id: user.uid,
-            email: user.email,
-            firstName: 'Customer',
-            lastName: '',
-            phone: '',
-          };
-          console.log('[Login] ⚠️ Customer not found, using defaults');
-        }
-      }
+      // ✅ STEP 2: GET CUSTOMER DATA
+      let customerData = customerSnap.data();
+      console.log('[Login] Step 2: Customer data from Firestore:', customerData);
 
       // Ensure email is always set
       if (!customerData.email || customerData.email === '') {
         customerData.email = user.email;
       }
 
-      console.log('[Login] Final customer data before saving:', customerData);
+      console.log('[Login] Step 3: Final customer data:', customerData);
 
-      // Update Firestore with complete data
+      // ✅ STEP 3: UPDATE FIRESTORE WITH COMPLETE DATA
       try {
-        const customerRef = doc(db, 'customers', user.uid);
-        
         const dataToSet = {
           id: user.uid,
           uid: user.uid,
@@ -153,8 +132,7 @@ function LoginContent() {
         };
 
         // Only add createdAt if new
-        const existingSnap = await getDoc(customerRef);
-        if (!existingSnap.exists()) {
+        if (!customerSnap.exists()) {
           dataToSet.createdAt = new Date().toISOString();
           dataToSet.wishlist = [];
         }
@@ -165,7 +143,14 @@ function LoginContent() {
         console.error('[Login] Firestore error:', firestoreError);
       }
 
-      // Save to localStorage
+      // ✅ STEP 4: CLEAR ADMIN DATA FIRST
+      console.log('[Login] Step 4: Clearing admin data...');
+      localStorage.removeItem('admin');
+      localStorage.removeItem('adminToken');
+      console.log('[Login] ✅ Admin data cleared');
+
+      // ✅ STEP 5: SET CUSTOMER DATA IN LOCALSTORAGE
+      console.log('[Login] Step 5: Setting customer data in localStorage...');
       const customer = {
         id: user.uid,
         email: customerData.email || user.email,
@@ -176,25 +161,27 @@ function LoginContent() {
 
       localStorage.setItem('customer', JSON.stringify(customer));
       localStorage.setItem('customerToken', token);
+      console.log('[Login] ✅ Customer data saved to localStorage:', customer);
 
-      console.log('[Login] ✅ Saved to localStorage:', customer);
-
-      // Sync cart
-      console.log('[Login] Syncing cart from Firestore...');
+      // ✅ STEP 6: SYNC CART
+      console.log('[Login] Step 6: Syncing cart from Firestore...');
       await syncCartFromFirestore(user.uid);
+      console.log('[Login] ✅ Cart synced');
 
       setLoading(false);
 
-      // Redirect
+      // ✅ STEP 7: REDIRECT
       if (isCheckout) {
-        console.log('[Login] Redirecting to checkout...');
+        console.log('[Login] ✅ Redirecting to checkout...');
         router.push('/checkout');
       } else {
-        console.log('[Login] Redirecting to account...');
+        console.log('[Login] ✅ Redirecting to customer account...');
         router.push('/customer/account');
       }
+      
+      console.log('[Login] ===== CUSTOMER LOGIN COMPLETE =====');
     } catch (err) {
-      console.error('[Login] Error:', err);
+      console.error('[Login] ❌ Error:', err);
       setLoading(false);
       
       if (err.code === 'auth/user-not-found') {
@@ -227,7 +214,7 @@ function LoginContent() {
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-white mb-2">Welcome Back</h1>
-          <p className="text-gray-400">Sign in to your account</p>
+          <p className="text-gray-400">Customer Sign In</p>
           {isCheckout && (
             <p className="text-sm text-blue-400 mt-2">📦 Complete your checkout</p>
           )}
@@ -237,7 +224,7 @@ function LoginContent() {
           {error && (
             <div className="bg-red-900/30 border border-red-500/50 rounded-lg p-4 mb-6 flex gap-3">
               <AlertCircle size={20} className="text-red-400 flex-shrink-0 mt-0.5" />
-              <p className="text-red-200 text-sm">{error}</p>
+              <p className="text-red-200 text-sm whitespace-pre-line">{error}</p>
             </div>
           )}
 
@@ -304,7 +291,7 @@ function LoginContent() {
               ) : (
                 <>
                   <LogIn size={20} />
-                  Sign In
+                  Customer Sign In
                 </>
               )}
             </button>
@@ -330,10 +317,16 @@ function LoginContent() {
           </div>
         </div>
 
-        <div className="text-center mt-6">
-          <Link href="/" className="text-gray-400 hover:text-white text-sm transition">
+        <div className="text-center mt-6 space-y-3">
+          <Link href="/" className="block text-gray-400 hover:text-white text-sm transition">
             ← Back to home
           </Link>
+          <p className="text-xs text-gray-500">
+            Are you an admin?{' '}
+            <Link href="/admin/login" className="text-green-400 hover:text-green-300 font-semibold">
+              Admin login
+            </Link>
+          </p>
         </div>
       </div>
     </div>
