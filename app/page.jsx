@@ -22,28 +22,28 @@ export default function LandingPage() {
         console.log('[Landing] User authenticated:', currentUser.email);
         setUserEmail(currentUser.email);
         
-        // ✅ DETERMINE USER TYPE FROM FIRESTORE (not localStorage)
+        // ✅ DETERMINE USER TYPE FROM FIRESTORE
         try {
-          // Check if user is a customer
-          const customersCollection = 'customers';
-          const customerRef = doc(db, customersCollection, currentUser.uid);
+          // Check if user is a CUSTOMER in 'customers' collection
+          console.log('[Landing] Checking if user is customer...');
+          const customerRef = doc(db, 'customers', currentUser.uid);
           const customerSnap = await getDoc(customerRef);
 
           if (customerSnap.exists()) {
-            console.log('[Landing] Customer detected - User has customer record');
+            console.log('[Landing] ✅ Customer detected - User has record in customers collection');
             setUserType('customer');
             setUser(currentUser);
             setLoading(false);
             return;
           }
 
-          // Check if user is an admin
-          const adminsCollection = 'admins';
-          const adminRef = doc(db, adminsCollection, currentUser.uid);
+          // Check if user is an ADMIN in 'users' collection (NOT 'admins')
+          console.log('[Landing] Checking if user is admin...');
+          const adminRef = doc(db, 'users', currentUser.uid); // ✅ CORRECT COLLECTION
           const adminSnap = await getDoc(adminRef);
 
           if (adminSnap.exists()) {
-            console.log('[Landing] Admin detected - User has admin record');
+            console.log('[Landing] ✅ Admin detected - User has record in users collection');
             setUserType('admin');
             setUser(currentUser);
             setLoading(false);
@@ -51,7 +51,10 @@ export default function LandingPage() {
           }
 
           // User exists in Firebase but not in either collection
-          console.log('[Landing] User authenticated but no role found');
+          console.log('[Landing] ❌ User authenticated but no role found in any collection');
+          console.log('[Landing] Checked:');
+          console.log('  - customers/{uid}: Not found');
+          console.log('  - users/{uid}: Not found');
           setUserType(null);
           setUser(null);
         } catch (error) {
@@ -78,15 +81,16 @@ export default function LandingPage() {
       // Sign out from Firebase
       await signOut(auth);
       
-      // Clear all local storage related to both customer and admin
+      // ✅ Clear ALL local storage related to both customer and admin
       localStorage.removeItem('customer');
       localStorage.removeItem('customerToken');
       localStorage.removeItem('admin');
       localStorage.removeItem('adminToken');
       localStorage.removeItem('cart');
       localStorage.removeItem('wishlist');
+      localStorage.removeItem('notifications');
       
-      console.log('[Landing] Logout complete, all data cleared');
+      console.log('[Landing] ✅ Logout complete, all data cleared');
       
       // Reset state
       setUserType(null);
@@ -118,7 +122,7 @@ export default function LandingPage() {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-white mb-2">Welcome back! 👋</h1>
-            <p className="text-gray-400 mb-4">You're logged in as a customer</p>
+            <p className="text-gray-400 mb-4">You're logged in as a <span className="font-bold text-blue-400">CUSTOMER</span></p>
             <p className="text-sm text-gray-500">{user.email}</p>
           </div>
           <Link
@@ -149,7 +153,7 @@ export default function LandingPage() {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-white mb-2">Welcome back, Admin! 🔥</h1>
-            <p className="text-gray-400 mb-4">You're logged in as an admin</p>
+            <p className="text-gray-400 mb-4">You're logged in as an <span className="font-bold text-green-400">ADMIN</span></p>
             <p className="text-sm text-gray-500">{user.email}</p>
           </div>
           <Link
