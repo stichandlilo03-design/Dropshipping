@@ -23,7 +23,9 @@ function CheckoutContent() {
   // Load cart - try Firestore first, then localStorage
   const loadCart = async (customerId) => {
     try {
-      // TRY 1: Load from Firestore nested path
+      console.log('[Checkout] Loading cart for customer:', customerId);
+
+      // TRY 1: Load from Firestore
       try {
         const cartRef = doc(db, 'customers', customerId, 'cart', 'items');
         const cartSnap = await getDoc(cartRef);
@@ -32,37 +34,18 @@ function CheckoutContent() {
           const cartData = cartSnap.data();
           const items = cartData.items || [];
           if (items.length > 0) {
-            console.log('[Checkout] ✅ Cart loaded from Firestore nested path:', items);
+            console.log('[Checkout] ✅ Cart loaded from Firestore:', items);
             setCart(items);
             localStorage.setItem('cart', JSON.stringify(items));
-            return;
+            return; // ✅ RETURN HERE - DON'T TRY OTHER SOURCES
           }
         }
       } catch (err) {
-        console.log('[Checkout] Firestore nested path not found, trying document path...');
+        console.log('[Checkout] Firestore load failed, trying localStorage...');
       }
 
-      // TRY 2: Load from direct Firestore document
-      try {
-        const cartDocRef = doc(db, 'customers', customerId, 'cart', 'items');
-        const docSnap = await getDoc(cartDocRef);
-        
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          const items = Array.isArray(data) ? data : data.items || [];
-          if (items.length > 0) {
-            console.log('[Checkout] ✅ Cart loaded from direct document:', items);
-            setCart(items);
-            localStorage.setItem('cart', JSON.stringify(items));
-            return;
-          }
-        }
-      } catch (err) {
-        console.log('[Checkout] Direct document path failed');
-      }
-
-      // TRY 3: Fallback to localStorage
-      console.log('[Checkout] No cart in Firestore, loading from localStorage...');
+      // TRY 2: Load from localStorage
+      console.log('[Checkout] Loading from localStorage...');
       const cartData = localStorage.getItem('cart');
       if (cartData) {
         try {
@@ -71,7 +54,7 @@ function CheckoutContent() {
             console.log('[Checkout] ✅ Cart loaded from localStorage:', parsedCart);
             setCart(parsedCart);
             
-            // TRY TO SAVE TO FIRESTORE
+            // Save to Firestore for next time
             try {
               const cartRef = doc(db, 'customers', customerId, 'cart', 'items');
               await setDoc(cartRef, {
@@ -80,11 +63,11 @@ function CheckoutContent() {
                 total: parsedCart.reduce((sum, item) => sum + (parseFloat(item.price || 0) * item.quantity), 0),
                 itemCount: parsedCart.length,
               }, { merge: true });
-              console.log('[Checkout] ✅ Cart saved from localStorage to Firestore');
+              console.log('[Checkout] ✅ Cart synced to Firestore from localStorage');
             } catch (saveErr) {
               console.error('[Checkout] Could not save to Firestore:', saveErr);
             }
-            return;
+            return; // ✅ RETURN HERE - DON'T TRY OTHER SOURCES
           }
         } catch (parseErr) {
           console.error('[Checkout] Error parsing localStorage cart:', parseErr);
@@ -92,7 +75,7 @@ function CheckoutContent() {
       }
 
       // No cart found anywhere
-      console.log('[Checkout] No cart found');
+      console.log('[Checkout] ❌ No cart found in Firestore or localStorage');
       setCart([]);
     } catch (err) {
       console.error('[Checkout] Error loading cart:', err);
@@ -125,9 +108,10 @@ function CheckoutContent() {
     setLoading(false);
   }, [router]);
 
-  // Save cart to both localStorage and Firestore whenever it changes
+  // ✅ ONLY SAVE CART IF IT CHANGES (don't auto-delete on load)
   useEffect(() => {
     if (!customer || !customer.id) return;
+    if (loading) return; // Don't save while loading
 
     const saveCartAsync = async () => {
       try {
@@ -152,24 +136,23 @@ function CheckoutContent() {
           };
           
           await setDoc(cartDocRef, cartData, { merge: true });
-          console.log('[Checkout] Cart saved to Firestore:', cartData);
+          console.log('[Checkout] Cart saved to Firestore');
         } else {
-          // Delete from Firestore when cart is empty
+          // Only delete when user explicitly clears cart
           try {
             await deleteDoc(cartDocRef);
-            console.log('[Checkout] Cart deleted from Firestore');
+            console.log('[Checkout] Cart deleted from Firestore (user cleared it)');
           } catch (deleteErr) {
-            console.log('[Checkout] Cart already deleted or does not exist');
+            console.log('[Checkout] Cart already deleted');
           }
         }
       } catch (err) {
-        console.error('[Checkout] Error saving cart to Firestore:', err);
-        // Don't fail checkout if Firestore fails
+        console.error('[Checkout] Error saving cart:', err);
       }
     };
 
     saveCartAsync();
-  }, [cart, customer]);
+  }, [cart, customer, loading]);
 
   // Calculate amounts
   const calculateAmounts = () => {
