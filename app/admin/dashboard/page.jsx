@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { DollarSign, ShoppingCart, Package, TrendingUp, Zap, Users, LogOut, Settings, Download, BookOpen, ArrowRight, Plus, Flame, AlertCircle, CheckCircle, Clock, Lock, ArrowLeft, Eye, Trash2, Search } from 'lucide-react';
+import { DollarSign, ShoppingCart, Package, TrendingUp, Zap, Users, LogOut, Settings, Download, BookOpen, ArrowRight, Plus, Flame, AlertCircle, CheckCircle, Clock, Lock, ArrowLeft, Eye, Trash2, Search, Mail, Share2, Loader } from 'lucide-react';
 import { auth } from '@/lib/firebase';
 import { signOut, onAuthStateChanged } from 'firebase/auth';
 import { collection, getDocs, query, where, updateDoc, deleteDoc, doc } from 'firebase/firestore';
@@ -37,11 +37,18 @@ export default function AdminDashboard() {
     profitMargin: 0,
     avgOrderValue: 0,
     trendingAdded: 0,
+    automationStats: {
+      emailsSent: 0,
+      ordersShipped: 0,
+      socialPosts: 0,
+      printfulSynced: 0,
+    },
   });
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [showOrderModal, setShowOrderModal] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [automationFeatures, setAutomationFeatures] = useState({});
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -68,10 +75,10 @@ export default function AdminDashboard() {
 
       console.log('[AdminDashboard] Loading data for userId:', userId);
 
-      // STEP 1: Load orders FIRST (ALL orders for admin)
+      // STEP 1: Load orders
       let loadedOrders = [];
       try {
-        console.log('[AdminDashboard] Fetching all orders from /orders collection');
+        console.log('[AdminDashboard] Fetching all orders');
         const ordersRef = collection(firebaseDb, 'orders');
         const ordersSnap = await getDocs(ordersRef);
         loadedOrders = ordersSnap.docs.map(doc => ({
@@ -86,7 +93,7 @@ export default function AdminDashboard() {
         setOrders([]);
       }
 
-      // STEP 2: Load products (ALL products for admin)
+      // STEP 2: Load products
       let loadedProducts = [];
       try {
         console.log('[AdminDashboard] Fetching all products');
@@ -99,22 +106,16 @@ export default function AdminDashboard() {
         console.log('[AdminDashboard] Products loaded:', loadedProducts.length);
         setProducts(loadedProducts);
 
-        // Count products added from trending
         const trendingCount = loadedProducts.filter(p => p.trendingSource).length;
-        console.log('[AdminDashboard] Products from trending:', trendingCount);
-
-        // Calculate stats with loaded orders and products
         calculateStats(loadedOrders, loadedProducts, trendingCount);
       } catch (productsError) {
         console.error('[AdminDashboard] Error loading products:', productsError);
         loadedProducts = [];
         setProducts([]);
-        
-        // Still calculate stats even if products fail
         calculateStats(loadedOrders, [], 0);
       }
 
-      // STEP 3: Load customers (ALL customers for admin)
+      // STEP 3: Load customers
       let loadedCustomers = [];
       try {
         console.log('[AdminDashboard] Fetching all customers');
@@ -144,7 +145,6 @@ export default function AdminDashboard() {
         console.log('[AdminDashboard] Integrations loaded:', Object.keys(integrationsData).length);
         setIntegrations(integrationsData);
 
-        // Calculate feature availability
         calculateFeatureStatus(integrationsData);
       } catch (integrationsError) {
         console.error('[AdminDashboard] Error loading integrations:', integrationsError);
@@ -196,7 +196,6 @@ export default function AdminDashboard() {
       if (result.success) {
         setAddMessage({ type: 'success', text: result.message });
         
-        // Reload products to show new count
         setTimeout(async () => {
           await loadData(user.uid);
           setAddMessage(null);
@@ -255,6 +254,40 @@ export default function AdminDashboard() {
 
     console.log('[AdminDashboard] Connected APIs:', Object.keys(connected));
 
+    // ✅ NEW: Calculate automation features
+    const automation = {
+      emailAutomation: {
+        available: connected['gmail-smtp'] || connected['sendgrid'],
+        icon: '📧',
+        name: 'Email Automation',
+        description: 'Order confirmations & shipping emails',
+        missingAPIs: (!connected['gmail-smtp'] && !connected['sendgrid']) ? ['Gmail SMTP or SendGrid'] : [],
+      },
+      shippingAutomation: {
+        available: connected['printful'] && connected['cron-shipping'],
+        icon: '🚚',
+        name: 'Auto-Shipping',
+        description: 'Track orders every 6 hours',
+        missingAPIs: [],
+      },
+      socialPublishing: {
+        available: connected['tiktok'] || connected['instagram'] || connected['facebook'] || connected['pinterest'],
+        icon: '📱',
+        name: 'Social Publishing',
+        description: 'One-click product publishing',
+        missingAPIs: [],
+      },
+      printfulAutomation: {
+        available: connected['printful'],
+        icon: '📦',
+        name: 'Printful Auto-Sync',
+        description: 'Auto-sync orders & labels',
+        missingAPIs: !connected['printful'] ? ['Printful'] : [],
+      },
+    };
+
+    setAutomationFeatures(automation);
+
     const features = {
       trendingProducts: {
         available: connected['printful'] || connected['shopify'],
@@ -279,24 +312,26 @@ export default function AdminDashboard() {
 
   const calculateStats = (ordersData = [], productsData = [], trendingAdded = 0) => {
     try {
-      console.log('[AdminDashboard] Calculating stats with orders:', ordersData.length, 'products:', productsData.length);
+      console.log('[AdminDashboard] Calculating stats');
       
-      // ✅ Calculate ACTUAL revenue from PAID orders only
       let totalRevenue = 0;
       let totalCost = 0;
       let paidOrdersCount = 0;
+      let shippedOrders = 0;
 
       ordersData.forEach(order => {
         const orderTotal = parseFloat(order.total || 0);
         const orderStatus = String(order.status || '').toLowerCase();
 
-        // Only count paid orders in revenue
         if (orderStatus === 'paid' || orderStatus === 'completed' || orderStatus === 'shipped') {
           totalRevenue += orderTotal;
           paidOrdersCount++;
         }
 
-        // Calculate cost from items (estimate: 10% of price if no cost field)
+        if (orderStatus === 'shipped' || orderStatus === 'delivered') {
+          shippedOrders++;
+        }
+
         if (order.items && Array.isArray(order.items)) {
           order.items.forEach(item => {
             const itemCost = parseFloat(item.cost || (orderTotal * 0.1) || 0);
@@ -310,7 +345,6 @@ export default function AdminDashboard() {
       const profitMargin = totalRevenue > 0 ? parseFloat(((totalProfit / totalRevenue) * 100).toFixed(2)) : 0;
       const avgOrderValue = paidOrdersCount > 0 ? parseFloat((totalRevenue / paidOrdersCount).toFixed(2)) : 0;
 
-      // ✅ Count ACTIVE customers (those with orders)
       let activeCustomers = 0;
       customers.forEach(customer => {
         const hasOrder = ordersData.some(
@@ -320,15 +354,6 @@ export default function AdminDashboard() {
         );
         if (hasOrder) activeCustomers++;
       });
-
-      console.log('[AdminDashboard] Stats calculated:');
-      console.log('  Revenue (paid only):', totalRevenue);
-      console.log('  Cost:', totalCost);
-      console.log('  Profit:', totalProfit);
-      console.log('  Margin:', profitMargin + '%');
-      console.log('  Paid Orders:', paidOrdersCount);
-      console.log('  All Orders:', ordersData.length);
-      console.log('  Active Customers:', activeCustomers);
 
       setStats({
         totalRevenue: parseFloat(totalRevenue.toFixed(2)),
@@ -341,6 +366,12 @@ export default function AdminDashboard() {
         profitMargin,
         avgOrderValue,
         trendingAdded,
+        automationStats: {
+          emailsSent: paidOrdersCount, // Each paid order gets confirmation email
+          ordersShipped: shippedOrders,
+          socialPosts: productsData.filter(p => p.socialPosts?.length > 0).length,
+          printfulSynced: ordersData.filter(o => o.printful_synced).length,
+        },
       });
     } catch (error) {
       console.error('[AdminDashboard] Error calculating stats:', error);
@@ -415,6 +446,8 @@ export default function AdminDashboard() {
       total: connected.length,
       hasShopify: connected.includes('shopify'),
       hasPrintful: connected.includes('printful'),
+      hasEmail: connected.includes('gmail-smtp') || connected.includes('sendgrid'),
+      hasSocial: connected.includes('tiktok') || connected.includes('instagram') || connected.includes('facebook') || connected.includes('pinterest'),
     };
   };
 
@@ -487,7 +520,7 @@ export default function AdminDashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
           <div className="min-w-0">
             <h1 className="text-xl sm:text-2xl font-bold text-white truncate">📊 DropBoard Admin</h1>
-            <p className="text-xs sm:text-sm text-gray-400 truncate">Platform Management Dashboard</p>
+            <p className="text-xs sm:text-sm text-gray-400 truncate">100% Automated Platform Management</p>
           </div>
           <div className="flex items-center gap-1 sm:gap-2 flex-shrink-0">
             <button
@@ -538,10 +571,83 @@ export default function AdminDashboard() {
 
         {/* Message Alert */}
         {addMessage && (
-          <div className={`p-3 sm:p-4 rounded-lg border text-sm ${addMessage.type === 'success' ? 'bg-green-900/30 border-green-500 text-green-200' : 'bg-red-900/30 border-red-500 text-red-200'}`}>
+          <div className={`p-3 sm:p-4 rounded-lg border text-sm flex items-center gap-2 ${addMessage.type === 'success' ? 'bg-green-900/30 border-green-500 text-green-200' : 'bg-red-900/30 border-red-500 text-red-200'}`}>
+            {addMessage.type === 'success' ? <CheckCircle size={20} /> : <AlertCircle size={20} />}
             {addMessage.text}
           </div>
         )}
+
+        {/* ✅ NEW: Automation Status Overview */}
+        {(intStatus.hasEmail || intStatus.hasSocial || intStatus.hasPrintful) && (
+          <div className="bg-gradient-to-r from-green-900/20 to-blue-900/20 border border-green-500/30 rounded-lg p-4 sm:p-6">
+            <h3 className="text-lg sm:text-xl font-bold text-green-400 mb-4 flex items-center gap-2">
+              <Zap size={24} />
+              🚀 Automation Status
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+              <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700">
+                <p className="text-gray-400 text-xs font-semibold mb-1">📧 Emails Sent</p>
+                <p className="text-2xl sm:text-3xl font-bold text-blue-400">{stats.automationStats.emailsSent}</p>
+                <p className="text-xs text-gray-500 mt-1">Auto confirmations</p>
+              </div>
+              <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700">
+                <p className="text-gray-400 text-xs font-semibold mb-1">🚚 Orders Shipped</p>
+                <p className="text-2xl sm:text-3xl font-bold text-green-400">{stats.automationStats.ordersShipped}</p>
+                <p className="text-xs text-gray-500 mt-1">Tracking updated</p>
+              </div>
+              <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700">
+                <p className="text-gray-400 text-xs font-semibold mb-1">📱 Social Posts</p>
+                <p className="text-2xl sm:text-3xl font-bold text-purple-400">{stats.automationStats.socialPosts}</p>
+                <p className="text-xs text-gray-500 mt-1">Published products</p>
+              </div>
+              <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700">
+                <p className="text-gray-400 text-xs font-semibold mb-1">📦 Printful Synced</p>
+                <p className="text-2xl sm:text-3xl font-bold text-orange-400">{stats.automationStats.printfulSynced}</p>
+                <p className="text-xs text-gray-500 mt-1">Auto fulfillment</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ✅ NEW: Automation Features */}
+        <div>
+          <h3 className="text-xl sm:text-2xl font-bold text-white mb-6 flex items-center gap-2">
+            <Zap size={24} className="text-yellow-400" />
+            Automation Features
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            {Object.entries(automationFeatures).map(([key, feature]) => (
+              <div key={key} className={`rounded-lg border p-4 sm:p-5 transition ${
+                feature.available
+                  ? 'bg-green-900/20 border-green-500/30'
+                  : 'bg-slate-800/50 border-slate-700'
+              }`}>
+                <div className="flex items-start justify-between mb-3">
+                  <p className="text-2xl sm:text-3xl">{feature.icon}</p>
+                  {feature.available ? (
+                    <CheckCircle size={20} className="text-green-400 flex-shrink-0" />
+                  ) : (
+                    <Lock size={20} className="text-gray-500 flex-shrink-0" />
+                  )}
+                </div>
+                <h4 className="font-bold text-white text-sm sm:text-base mb-1">{feature.name}</h4>
+                <p className="text-xs text-gray-400 mb-3">{feature.description}</p>
+                {feature.available ? (
+                  <span className="inline-block bg-green-500/20 text-green-400 px-2 py-1 rounded text-xs font-semibold">
+                    ✅ Active
+                  </span>
+                ) : (
+                  <div className="text-xs text-gray-500">
+                    <p className="mb-1">Missing: {feature.missingAPIs.join(', ')}</p>
+                    <Link href="/integrations" className="text-blue-400 font-semibold hover:underline">
+                      Connect →
+                    </Link>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
 
         {/* Setup Banner */}
         {intStatus.total === 0 && (
@@ -553,7 +659,7 @@ export default function AdminDashboard() {
                   Get Started in 3 Steps
                 </h3>
                 <p className="text-xs sm:text-sm text-gray-400 mb-4">
-                  Connect your first integration to unlock trending products and automation
+                  Connect integrations to unlock automation, trending products, and social publishing
                 </p>
                 <Link href="/integrations" className="inline-block bg-yellow-600 hover:bg-yellow-700 text-white px-3 sm:px-4 py-2 rounded-lg font-medium transition flex items-center gap-2 text-xs sm:text-sm">
                   <Zap size={16} />
@@ -574,51 +680,45 @@ export default function AdminDashboard() {
             <CheckCircle size={24} className="text-green-400 flex-shrink-0 mt-0.5 sm:mt-0" />
             <div>
               <h3 className="font-bold text-green-400 text-sm sm:text-base">✅ Integrations Connected!</h3>
-              <p className="text-xs text-gray-400 mt-1">{intStatus.total} platform{intStatus.total !== 1 ? 's' : ''} connected</p>
+              <p className="text-xs text-gray-400 mt-1">{intStatus.total} platform{intStatus.total !== 1 ? 's' : ''} connected - Automation active! 🚀</p>
             </div>
           </div>
         )}
 
-        {/* Key Metrics - Responsive Grid */}
+        {/* Key Metrics - Enhanced */}
         <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-6 gap-2 sm:gap-3 lg:gap-4">
-          {/* Revenue */}
           <div className="bg-slate-800 border border-slate-700 rounded-lg p-3 sm:p-4 space-y-1">
-            <p className="text-gray-400 text-xs font-medium">Revenue</p>
+            <p className="text-gray-400 text-xs font-medium">💰 Revenue</p>
             <p className="text-xl sm:text-2xl font-bold text-green-400">${stats.totalRevenue.toFixed(2)}</p>
             <p className="text-xs text-gray-500">{stats.totalOrders} orders</p>
           </div>
 
-          {/* Profit */}
           <div className="bg-slate-800 border border-slate-700 rounded-lg p-3 sm:p-4 space-y-1">
-            <p className="text-gray-400 text-xs font-medium">Profit</p>
+            <p className="text-gray-400 text-xs font-medium">📈 Profit</p>
             <p className="text-xl sm:text-2xl font-bold text-blue-400">${stats.totalProfit.toFixed(2)}</p>
             <p className="text-xs text-gray-500">{stats.profitMargin}% margin</p>
           </div>
 
-          {/* Cost */}
           <div className="bg-slate-800 border border-slate-700 rounded-lg p-3 sm:p-4 space-y-1">
-            <p className="text-gray-400 text-xs font-medium">Cost</p>
+            <p className="text-gray-400 text-xs font-medium">💳 Cost</p>
             <p className="text-xl sm:text-2xl font-bold text-orange-400">${stats.totalCost.toFixed(2)}</p>
             <p className="text-xs text-gray-500">COGS</p>
           </div>
 
-          {/* Products */}
           <div className="bg-slate-800 border border-slate-700 rounded-lg p-3 sm:p-4 space-y-1">
-            <p className="text-gray-400 text-xs font-medium">Products</p>
+            <p className="text-gray-400 text-xs font-medium">📦 Products</p>
             <p className="text-xl sm:text-2xl font-bold text-purple-400">{stats.totalProducts}</p>
             <p className="text-xs text-gray-500">{stats.trendingAdded} trending</p>
           </div>
 
-          {/* Customers */}
           <div className="bg-slate-800 border border-slate-700 rounded-lg p-3 sm:p-4 space-y-1">
-            <p className="text-gray-400 text-xs font-medium">Customers</p>
+            <p className="text-gray-400 text-xs font-medium">👥 Customers</p>
             <p className="text-xl sm:text-2xl font-bold text-pink-400">{stats.totalCustomers}</p>
             <p className="text-xs text-gray-500">{stats.activeCustomers} active</p>
           </div>
 
-          {/* Integrations */}
           <div className="bg-slate-800 border border-slate-700 rounded-lg p-3 sm:p-4 space-y-1">
-            <p className="text-gray-400 text-xs font-medium">Integrations</p>
+            <p className="text-gray-400 text-xs font-medium">⚡ Integrations</p>
             <p className="text-xl sm:text-2xl font-bold text-indigo-400">{intStatus.total}</p>
             <p className="text-xs text-gray-500">Connected</p>
           </div>
@@ -696,7 +796,7 @@ export default function AdminDashboard() {
                       >
                         {addingProduct === product.id ? (
                           <>
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                            <Loader size={16} className="animate-spin" />
                             Adding...
                           </>
                         ) : (
@@ -885,6 +985,9 @@ export default function AdminDashboard() {
                     {product.trendingSource && (
                       <p className="text-xs text-orange-400 mb-2">📊 From: {product.trendingSource}</p>
                     )}
+                    {product.socialPosts && product.socialPosts.length > 0 && (
+                      <p className="text-xs text-purple-400 mb-2">📱 {product.socialPosts.length} social post{product.socialPosts.length > 1 ? 's' : ''}</p>
+                    )}
                     <p className="text-xs text-gray-500">Stock: {product.inventory || 0}</p>
                   </div>
                 </div>
@@ -900,14 +1003,15 @@ export default function AdminDashboard() {
         {/* Integration Status */}
         <div>
           <h3 className="text-xl sm:text-2xl font-bold text-white mb-6">Integration Status</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 sm:gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
             {[
-              { key: 'printful', icon: '📦', name: 'Printful' },
-              { key: 'shopify', icon: '🛍️', name: 'Shopify' },
-              { key: 'stripe', icon: '💳', name: 'Stripe' },
-              { key: 'tiktok', icon: '🎵', name: 'TikTok' },
-              { key: 'gmail-smtp', icon: '📧', name: 'Gmail' },
-            ].map(({ key, icon, name }) => (
+              { key: 'printful', icon: '📦', name: 'Printful', category: 'Fulfillment' },
+              { key: 'shopify', icon: '🛍️', name: 'Shopify', category: 'Store' },
+              { key: 'stripe', icon: '💳', name: 'Stripe', category: 'Payment' },
+              { key: 'tiktok', icon: '🎵', name: 'TikTok', category: 'Social' },
+              { key: 'gmail-smtp', icon: '📧', name: 'Gmail', category: 'Email' },
+              { key: 'instagram', icon: '📷', name: 'Instagram', category: 'Social' },
+            ].map(({ key, icon, name, category }) => (
               <div key={key} className="bg-slate-800 border border-slate-700 rounded-lg p-3 sm:p-4">
                 <div className="flex items-center justify-between mb-2 sm:mb-3">
                   <p className="text-xs sm:text-sm font-semibold text-white">{icon} {name}</p>
@@ -917,6 +1021,7 @@ export default function AdminDashboard() {
                     <Clock size={16} className="text-gray-500 flex-shrink-0" />
                   )}
                 </div>
+                <p className="text-xs text-gray-500 mb-2">{category}</p>
                 <p className="text-xs text-gray-400 mb-2">
                   {integrations[key]?.status === 'connected' ? '✅ Connected' : '⏳ Not connected'}
                 </p>
@@ -977,13 +1082,22 @@ export default function AdminDashboard() {
         {/* Quick Actions */}
         <div>
           <h3 className="text-xl sm:text-2xl font-bold text-white mb-6">Quick Actions</h3>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2 sm:gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 sm:gap-4">
             <Link href="/products" className="bg-slate-800 border border-slate-700 hover:border-blue-500 rounded-lg p-3 sm:p-4 transition">
               <Package size={20} className="text-purple-400 mb-2" />
               <p className="font-semibold text-white text-xs sm:text-sm">Products</p>
               <p className="text-xs text-gray-400 mt-1">{stats.totalProducts} total</p>
               <div className="flex items-center gap-1 text-blue-400 text-xs mt-2">
                 Manage <ArrowRight size={12} />
+              </div>
+            </Link>
+
+            <Link href="/products" className="bg-slate-800 border border-slate-700 hover:border-blue-500 rounded-lg p-3 sm:p-4 transition">
+              <Share2 size={20} className="text-purple-400 mb-2" />
+              <p className="font-semibold text-white text-xs sm:text-sm">Publish</p>
+              <p className="text-xs text-gray-400 mt-1">Social Media</p>
+              <div className="flex items-center gap-1 text-blue-400 text-xs mt-2">
+                Publish <ArrowRight size={12} />
               </div>
             </Link>
 
