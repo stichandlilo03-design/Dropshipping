@@ -432,7 +432,7 @@ export default function ProductPage() {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-4">
-              {/* Cart */}
+              {/* Cart Button - Responsive */}
               <div ref={cartRef} className="relative">
                 <button
                   onClick={() => setShowCartDropdown(!showCartDropdown)}
@@ -446,9 +446,11 @@ export default function ProductPage() {
                   )}
                 </button>
 
+                {/* MOBILE CART DROPDOWN - Full Screen */}
                 {showCartDropdown && (
-                  <div className="absolute right-0 top-full mt-2 w-96 bg-slate-800 border border-slate-700 rounded-xl shadow-2xl overflow-hidden z-50">
-                    <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4 flex items-center justify-between">
+                  <div className="fixed sm:absolute left-0 right-0 sm:left-auto sm:right-0 top-20 sm:top-full bottom-0 sm:bottom-auto sm:mt-2 sm:w-96 bg-slate-800 border border-slate-700 rounded-t-2xl sm:rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col">
+                    {/* Header */}
+                    <div className="bg-gradient-to-r from-blue-600 to-blue-700 px-4 sm:px-6 py-4 flex items-center justify-between flex-shrink-0">
                       <h3 className="text-lg font-bold text-white flex items-center gap-2">
                         <ShoppingCart size={20} />
                         Your Cart
@@ -461,16 +463,17 @@ export default function ProductPage() {
                       </button>
                     </div>
 
-                    <div className="max-h-80 overflow-y-auto">
+                    {/* Items Scrollable Area */}
+                    <div className="flex-1 overflow-y-auto">
                       {cart.length === 0 ? (
-                        <div className="p-8 text-center">
-                          <ShoppingCart size={40} className="text-gray-500 mx-auto mb-4" />
+                        <div className="p-8 text-center flex flex-col items-center justify-center h-full">
+                          <ShoppingCart size={40} className="text-gray-500 mb-4" />
                           <p className="text-gray-400 text-sm">Cart is empty</p>
                         </div>
                       ) : (
                         <div className="divide-y divide-slate-700">
                           {cart.map((item) => (
-                            <div key={item.id} className="p-4 hover:bg-slate-700/50 transition">
+                            <div key={item.id} className="p-3 sm:p-4 hover:bg-slate-700/50 transition">
                               <div className="flex gap-3 mb-3">
                                 {item.image && (
                                   <img
@@ -518,9 +521,10 @@ export default function ProductPage() {
                       )}
                     </div>
 
+                    {/* Footer - Always Visible */}
                     {cart.length > 0 && (
-                      <div className="border-t border-slate-700 bg-slate-900 px-6 py-4">
-                        <div className="space-y-2 mb-4 bg-slate-800 p-3 rounded-lg text-sm">
+                      <div className="border-t border-slate-700 bg-slate-900 px-4 sm:px-6 py-4 flex-shrink-0">
+                        <div className="space-y-2 mb-4 bg-slate-800 p-3 rounded-lg text-xs sm:text-sm">
                           <div className="flex justify-between text-gray-400">
                             <span>Subtotal</span>
                             <span>${cartTotal.toFixed(2)}</span>
@@ -544,16 +548,16 @@ export default function ProductPage() {
                             setShowCartDropdown(false);
                             setShowCheckout(true);
                           }}
-                          className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold transition text-sm mb-2"
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 sm:py-3 rounded-lg font-bold transition text-sm mb-2"
                         >
                           Checkout
                         </button>
 
                         <button
                           onClick={() => setShowCartDropdown(false)}
-                          className="w-full bg-slate-700 hover:bg-slate-600 text-white py-2 rounded-lg transition text-sm"
+                          className="w-full bg-slate-700 hover:bg-slate-600 text-white py-2 sm:py-3 rounded-lg transition text-sm"
                         >
-                          Continue
+                          Continue Shopping
                         </button>
                       </div>
                     )}
