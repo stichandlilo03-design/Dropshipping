@@ -41,7 +41,7 @@ function LoginContent() {
     setPageLoading(false);
   }, [isCheckout, urlEmail, router]);
 
-  // Function to sync cart from Firestore (ONLY if cart exists)
+  // Function to sync cart from Firestore
   const syncCartFromFirestore = async (userId) => {
     try {
       const cartDocRef = doc(db, 'customers', userId, 'cart', 'items');
@@ -51,7 +51,7 @@ function LoginContent() {
         const cartData = cartSnap.data();
         const items = cartData.items || [];
 
-        // Only load if items exist in Firestore (user didn't clear it)
+        // Only load if items exist (user didn't clear it)
         if (items.length > 0) {
           console.log('[Login] Cart synced from Firestore:', items);
           localStorage.setItem('cart', JSON.stringify(items));
@@ -98,36 +98,55 @@ function LoginContent() {
 
       console.log('[Login] Token obtained, fetching profile...');
 
-      // Fetch customer data from Firestore
-      const response = await fetch('/api/customers/profile', {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'X-User-ID': user.uid,
-          'Content-Type': 'application/json',
-        },
-      });
+      // Get customer data from Firestore directly
+      const customerRef = doc(db, 'customers', user.uid);
+      const customerSnap = await getDoc(customerRef);
 
-      console.log('[Login] Profile API response status:', response.status);
+      let customerData;
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('[Login] Profile API error:', errorData);
-        throw new Error('Failed to fetch customer profile');
+      if (customerSnap.exists()) {
+        // Get existing customer data from Firestore
+        customerData = customerSnap.data();
+        console.log('[Login] Customer data found in Firestore:', customerData);
+      } else {
+        // If not in Firestore, try to fetch from API
+        console.log('[Login] Customer not in Firestore, fetching from API...');
+        const response = await fetch('/api/customers/profile', {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'X-User-ID': user.uid,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          console.error('[Login] Profile API error:', errorData);
+          // Create basic customer object with email from auth
+          customerData = {
+            id: user.uid,
+            email: user.email,
+            firstName: 'Customer',
+            lastName: '',
+            phone: '',
+          };
+        } else {
+          customerData = await response.json();
+          console.log('[Login] Customer data fetched from API:', customerData);
+        }
       }
 
-      const customerData = await response.json();
+      // Ensure email is set (from auth if not in database)
+      if (!customerData.email || customerData.email === '') {
+        customerData.email = user.email;
+      }
 
-      console.log('[Login] Customer data fetched:', customerData);
-
-      // Initialize/Update customer document in Firestore with wishlist field
+      // Initialize/Update customer document in Firestore
       try {
-        const customerRef = doc(db, 'customers', user.uid);
-        const customerSnap = await getDoc(customerRef);
-
         const dataToSet = {
           id: user.uid,
-          email: user.email,
+          email: customerData.email || user.email,
           firstName: customerData.firstName || 'Customer',
           lastName: customerData.lastName || '',
           phone: customerData.phone || '',
@@ -142,15 +161,18 @@ function LoginContent() {
 
         await setDoc(customerRef, dataToSet, { merge: true });
         console.log('[Login] Firestore customer document initialized/updated');
+        
+        // Update customerData with what we just saved
+        customerData = dataToSet;
       } catch (firestoreError) {
         console.error('[Login] Firestore error (non-blocking):', firestoreError);
         // Don't fail login if Firestore update fails - continue anyway
       }
 
-      // Store in localStorage
+      // Store in localStorage with guaranteed email
       const customer = {
         id: user.uid,
-        email: user.email,
+        email: customerData.email || user.email,
         firstName: customerData.firstName || 'Customer',
         lastName: customerData.lastName || '',
         phone: customerData.phone || '',
@@ -159,7 +181,7 @@ function LoginContent() {
       localStorage.setItem('customer', JSON.stringify(customer));
       localStorage.setItem('customerToken', token);
 
-      console.log('[Login] Customer saved to localStorage');
+      console.log('[Login] Customer saved to localStorage:', customer);
 
       // Sync cart from Firestore
       console.log('[Login] Syncing cart from Firestore...');
