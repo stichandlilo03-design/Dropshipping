@@ -45,41 +45,52 @@ function CustomerDashboardContent() {
 
       const customerData = localStorage.getItem('customer');
       if (!customerData) {
+        console.log('[Dashboard] No customer data in localStorage, redirecting...');
         router.push('/customer/login');
         return;
       }
 
       let parsedCustomer = JSON.parse(customerData);
+      console.log('[Dashboard] Customer from localStorage:', parsedCustomer);
 
-      // Load fresh customer data from Firestore to ensure we have all details
+      // Load fresh customer data from Firestore
       try {
         const customerRef = doc(db, 'customers', parsedCustomer.id);
         const customerSnap = await getDoc(customerRef);
 
         if (customerSnap.exists()) {
           const firestoreData = customerSnap.data();
-          console.log('[Dashboard] Customer data from Firestore:', firestoreData);
+          console.log('[Dashboard] Raw Firestore data:', firestoreData);
 
-          // Merge Firestore data with localStorage (Firestore takes priority)
-          parsedCustomer = {
-            id: parsedCustomer.id,
-            email: firestoreData.email || parsedCustomer.email || '',
-            firstName: firestoreData.firstName || parsedCustomer.firstName || 'Customer',
-            lastName: firestoreData.lastName || parsedCustomer.lastName || '',
-            phone: firestoreData.phone || parsedCustomer.phone || '',
+          // Properly merge data
+          const updatedCustomer = {
+            id: parsedCustomer.id || firestoreData.uid,
+            email: firestoreData.email && firestoreData.email.trim() ? firestoreData.email : parsedCustomer.email,
+            firstName: firestoreData.firstName && firestoreData.firstName.trim() ? firestoreData.firstName : parsedCustomer.firstName || 'Customer',
+            lastName: firestoreData.lastName && firestoreData.lastName.trim() ? firestoreData.lastName : parsedCustomer.lastName || '',
+            phone: firestoreData.phone && firestoreData.phone.trim() ? firestoreData.phone : parsedCustomer.phone || '',
           };
 
+          console.log('[Dashboard] Merged customer data:', updatedCustomer);
+
           // Update localStorage with fresh data
-          localStorage.setItem('customer', JSON.stringify(parsedCustomer));
-          console.log('[Dashboard] Customer data updated from Firestore:', parsedCustomer);
+          localStorage.setItem('customer', JSON.stringify(updatedCustomer));
+
+          // Set the state
+          setCustomer(updatedCustomer);
+          parsedCustomer = updatedCustomer;
+
+          console.log('[Dashboard] State updated with:', updatedCustomer);
+        } else {
+          console.log('[Dashboard] Customer document does not exist in Firestore');
+          setCustomer(parsedCustomer);
         }
       } catch (err) {
-        console.error('[Dashboard] Error loading from Firestore, using localStorage:', err);
-        // Continue with localStorage data
+        console.error('[Dashboard] Error loading from Firestore:', err);
+        setCustomer(parsedCustomer);
       }
 
-      setCustomer(parsedCustomer);
-
+      // Load other data
       await loadWishlistFromFirestore(parsedCustomer.id);
 
       const savedNotifications = localStorage.getItem('notifications');
@@ -362,6 +373,12 @@ function CustomerDashboardContent() {
 
   const cartCount = cart.reduce((sum, item) => sum + (item.quantity || 1), 0);
 
+  // Extract first and last name properly
+  const firstName = customer?.firstName || 'Customer';
+  const lastName = customer?.lastName || '';
+  const email = customer?.email || 'No email';
+  const phone = customer?.phone || 'No phone';
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
       {/* HEADER */}
@@ -374,7 +391,7 @@ function CustomerDashboardContent() {
               </Link>
               <div className="min-w-0">
                 <h1 className="text-xl sm:text-2xl font-bold text-white truncate">👤 Dashboard</h1>
-                <p className="text-xs sm:text-sm text-gray-400 truncate">Welcome, {customer.firstName}!</p>
+                <p className="text-xs sm:text-sm text-gray-400 truncate">Welcome, {firstName}!</p>
               </div>
             </div>
 
@@ -470,102 +487,19 @@ function CustomerDashboardContent() {
 
       {/* CONTENT */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-24 sm:pb-8">
-        {/* SHOP TAB */}
-        {activeTab === 'shop' && (
-          <div className="space-y-6">
-            <div className="bg-gradient-to-r from-orange-600 to-orange-700 rounded-xl p-6 text-white">
-              <h2 className="text-2xl sm:text-3xl font-bold mb-2 flex items-center gap-2">
-                <Store size={28} />
-                Shop Products
-              </h2>
-              <p className="text-orange-100 text-sm sm:text-base">Browse admin uploaded products</p>
-            </div>
-
-            {products.length === 0 ? (
-              <div className="text-center py-12">
-                <Store size={48} className="text-gray-600 mx-auto mb-4" />
-                <p className="text-gray-400">No products available yet</p>
-              </div>
-            ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
-                {products.map((product) => (
-                  <div key={product.id} className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden hover:border-blue-500 transition group">
-                    {product.image && (
-                      <div className="h-32 sm:h-40 overflow-hidden bg-slate-700 relative">
-                        <img src={product.image} alt={product.name} className="w-full h-full object-cover group-hover:scale-105 transition" />
-                        <button
-                          onClick={() => toggleWishlist(product.id)}
-                          className="absolute top-2 right-2 p-2 bg-slate-900/80 hover:bg-slate-900 rounded-lg transition"
-                        >
-                          <Heart size={16} className={wishlist.includes(product.id) ? 'fill-red-500 text-red-500' : 'text-gray-400'} />
-                        </button>
-                      </div>
-                    )}
-                    <div className="p-2 sm:p-4 space-y-2">
-                      <div>
-                        <h3 className="text-white font-bold line-clamp-2 text-xs sm:text-sm">{product.name || product.productName}</h3>
-                        <p className="text-gray-400 text-xs">{product.category || 'Product'}</p>
-                      </div>
-
-                      {product.description && (
-                        <p className="text-gray-400 text-xs line-clamp-2">{product.description}</p>
-                      )}
-
-                      <div className="flex items-center justify-between pt-2 border-t border-slate-700">
-                        <span className="text-green-400 font-bold text-sm sm:text-base">${parseFloat(product.price).toFixed(2)}</span>
-                        {product.rating && (
-                          <div className="flex items-center gap-0.5">
-                            <Star size={12} className="fill-yellow-400 text-yellow-400" />
-                            <span className="text-xs text-gray-400">{product.rating}</span>
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex gap-2">
-                        <Link
-                          href={`/p/${product.id}`}
-                          className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded text-xs font-semibold text-center transition"
-                        >
-                          View
-                        </Link>
-                        <button
-                          onClick={() => addToCart(product)}
-                          className={`flex-1 py-2 rounded text-xs font-semibold transition flex items-center justify-center gap-1 ${
-                            addedItem === product.id
-                              ? 'bg-green-600 text-white'
-                              : 'bg-blue-600 hover:bg-blue-700 text-white'
-                          }`}
-                        >
-                          {addedItem === product.id ? (
-                            <>
-                              <Check size={12} />
-                              <span className="hidden sm:inline">Added</span>
-                            </>
-                          ) : (
-                            <>
-                              <ShoppingCart size={12} />
-                              <span className="hidden sm:inline">Add</span>
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
         {/* OVERVIEW TAB */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
+            {/* CUSTOMER INFO CARD */}
             <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-6 text-white">
-              <h2 className="text-2xl sm:text-3xl font-bold mb-2">{customer.firstName} {customer.lastName}</h2>
-              <p className="text-blue-100 text-sm sm:text-base">{customer.email || 'No email'}</p>
-              <p className="text-blue-100 text-xs sm:text-sm mt-2">{customer.phone || 'No phone'}</p>
+              <h2 className="text-2xl sm:text-3xl font-bold mb-2">
+                {firstName} {lastName}
+              </h2>
+              <p className="text-blue-100 text-sm sm:text-base">📧 {email}</p>
+              <p className="text-blue-100 text-xs sm:text-sm mt-2">📱 {phone}</p>
             </div>
 
+            {/* STATS */}
             <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               <div className="bg-slate-800 rounded-lg border border-slate-700 p-4 sm:p-6">
                 <div className="flex items-center justify-between mb-2">
@@ -652,40 +586,91 @@ function CustomerDashboardContent() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
 
-            {/* Recommended */}
-            {recommendedProducts.length > 0 && (
-              <div>
-                <h3 className="text-lg sm:text-xl font-bold text-white mb-4">Recommended</h3>
-                <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                  {recommendedProducts.slice(0, 3).map((prod) => (
-                    <div key={prod.id} className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden hover:border-blue-500 transition group">
-                      {prod.image && (
-                        <div className="h-24 sm:h-32 overflow-hidden bg-slate-700 relative">
-                          <img src={prod.image} alt={prod.name} className="w-full h-full object-cover group-hover:scale-105 transition" />
-                        </div>
+        {/* SHOP TAB */}
+        {activeTab === 'shop' && (
+          <div className="space-y-6">
+            <div className="bg-gradient-to-r from-orange-600 to-orange-700 rounded-xl p-6 text-white">
+              <h2 className="text-2xl sm:text-3xl font-bold mb-2 flex items-center gap-2">
+                <Store size={28} />
+                Shop Products
+              </h2>
+              <p className="text-orange-100 text-sm sm:text-base">Browse admin uploaded products</p>
+            </div>
+
+            {products.length === 0 ? (
+              <div className="text-center py-12">
+                <Store size={48} className="text-gray-600 mx-auto mb-4" />
+                <p className="text-gray-400">No products available yet</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
+                {products.map((product) => (
+                  <div key={product.id} className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden hover:border-blue-500 transition group">
+                    {product.image && (
+                      <div className="h-32 sm:h-40 overflow-hidden bg-slate-700 relative">
+                        <img src={product.image} alt={product.name} className="w-full h-full object-cover group-hover:scale-105 transition" />
+                        <button
+                          onClick={() => toggleWishlist(product.id)}
+                          className="absolute top-2 right-2 p-2 bg-slate-900/80 hover:bg-slate-900 rounded-lg transition"
+                        >
+                          <Heart size={16} className={wishlist.includes(product.id) ? 'fill-red-500 text-red-500' : 'text-gray-400'} />
+                        </button>
+                      </div>
+                    )}
+                    <div className="p-2 sm:p-4 space-y-2">
+                      <div>
+                        <h3 className="text-white font-bold line-clamp-2 text-xs sm:text-sm">{product.name || product.productName}</h3>
+                        <p className="text-gray-400 text-xs">{product.category || 'Product'}</p>
+                      </div>
+
+                      {product.description && (
+                        <p className="text-gray-400 text-xs line-clamp-2">{product.description}</p>
                       )}
-                      <div className="p-3 sm:p-4 space-y-2">
-                        <h4 className="font-semibold text-white text-xs sm:text-sm line-clamp-2">{prod.name}</h4>
-                        <div className="flex items-center justify-between">
-                          <p className="text-lg sm:text-xl font-bold text-green-400">${parseFloat(prod.price || 0).toFixed(2)}</p>
-                          <button
-                            onClick={() => toggleWishlist(prod.id)}
-                            className="text-red-400 hover:text-red-300 flex-shrink-0"
-                          >
-                            <Heart size={14} fill={wishlist.includes(prod.id) ? 'currentColor' : 'none'} />
-                          </button>
-                        </div>
+
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-700">
+                        <span className="text-green-400 font-bold text-sm sm:text-base">${parseFloat(product.price).toFixed(2)}</span>
+                        {product.rating && (
+                          <div className="flex items-center gap-0.5">
+                            <Star size={12} className="fill-yellow-400 text-yellow-400" />
+                            <span className="text-xs text-gray-400">{product.rating}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex gap-2">
                         <Link
-                          href={`/p/${prod.id}`}
-                          className="block w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded text-xs font-semibold text-center transition"
+                          href={`/p/${product.id}`}
+                          className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded text-xs font-semibold text-center transition"
                         >
                           View
                         </Link>
+                        <button
+                          onClick={() => addToCart(product)}
+                          className={`flex-1 py-2 rounded text-xs font-semibold transition flex items-center justify-center gap-1 ${
+                            addedItem === product.id
+                              ? 'bg-green-600 text-white'
+                              : 'bg-blue-600 hover:bg-blue-700 text-white'
+                          }`}
+                        >
+                          {addedItem === product.id ? (
+                            <>
+                              <Check size={12} />
+                              <span className="hidden sm:inline">Added</span>
+                            </>
+                          ) : (
+                            <>
+                              <ShoppingCart size={12} />
+                              <span className="hidden sm:inline">Add</span>
+                            </>
+                          )}
+                        </button>
                       </div>
                     </div>
-                  ))}
-                </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -955,7 +940,7 @@ function CustomerDashboardContent() {
         </div>
       )}
 
-      {/* CART BUTTON - PROPERLY RESPONSIVE */}
+      {/* CART BUTTON */}
       {cartCount > 0 && (
         <Link
           href="/checkout"
