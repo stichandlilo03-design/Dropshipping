@@ -217,7 +217,6 @@ function AdminLoginContent() {
                 </li>
                 <li className="flex gap-2">
                   <span className="text-green-400 flex-shrink-0">✓</span>
-                  <span>Completely separate databases</span>
                 </li>
               </ul>
             </div>
