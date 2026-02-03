@@ -6,30 +6,64 @@ import Link from 'next/link';
 import { Zap, ArrowRight, Lock, Users, LogOut } from 'lucide-react';
 import { auth } from '@/lib/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { doc, getDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 export default function LandingPage() {
   const router = useRouter();
   const [userType, setUserType] = useState(null);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [userEmail, setUserEmail] = useState(null);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
-        // Check if customer or admin by checking localStorage
-        const customerData = localStorage.getItem('customer');
-        if (customerData) {
-          console.log('[Landing] Customer detected');
-          setUserType('customer');
-          setUser(currentUser);
-        } else {
-          console.log('[Landing] Admin detected');
-          setUserType('admin');
-          setUser(currentUser);
+        console.log('[Landing] User authenticated:', currentUser.email);
+        setUserEmail(currentUser.email);
+        
+        // ✅ DETERMINE USER TYPE FROM FIRESTORE (not localStorage)
+        try {
+          // Check if user is a customer
+          const customersCollection = 'customers';
+          const customerRef = doc(db, customersCollection, currentUser.uid);
+          const customerSnap = await getDoc(customerRef);
+
+          if (customerSnap.exists()) {
+            console.log('[Landing] Customer detected - User has customer record');
+            setUserType('customer');
+            setUser(currentUser);
+            setLoading(false);
+            return;
+          }
+
+          // Check if user is an admin
+          const adminsCollection = 'admins';
+          const adminRef = doc(db, adminsCollection, currentUser.uid);
+          const adminSnap = await getDoc(adminRef);
+
+          if (adminSnap.exists()) {
+            console.log('[Landing] Admin detected - User has admin record');
+            setUserType('admin');
+            setUser(currentUser);
+            setLoading(false);
+            return;
+          }
+
+          // User exists in Firebase but not in either collection
+          console.log('[Landing] User authenticated but no role found');
+          setUserType(null);
+          setUser(null);
+        } catch (error) {
+          console.error('[Landing] Error checking user role:', error);
+          setUserType(null);
+          setUser(null);
         }
       } else {
+        console.log('[Landing] No user authenticated');
         setUserType(null);
         setUser(null);
+        setUserEmail(null);
       }
       setLoading(false);
     });
@@ -39,13 +73,27 @@ export default function LandingPage() {
 
   const handleLogout = async () => {
     try {
+      console.log('[Landing] Logging out user:', userEmail);
+      
+      // Sign out from Firebase
       await signOut(auth);
+      
+      // Clear all local storage related to both customer and admin
       localStorage.removeItem('customer');
       localStorage.removeItem('customerToken');
+      localStorage.removeItem('admin');
+      localStorage.removeItem('adminToken');
+      localStorage.removeItem('cart');
+      localStorage.removeItem('wishlist');
+      
+      console.log('[Landing] Logout complete, all data cleared');
+      
+      // Reset state
       setUserType(null);
       setUser(null);
+      setUserEmail(null);
     } catch (error) {
-      console.error('Logout error:', error);
+      console.error('[Landing] Logout error:', error);
     }
   };
 
@@ -60,7 +108,7 @@ export default function LandingPage() {
     );
   }
 
-  // If user is logged in - redirect to appropriate dashboard
+  // ✅ If CUSTOMER is logged in - redirect to customer dashboard
   if (userType === 'customer' && user) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-4">
@@ -69,8 +117,8 @@ export default function LandingPage() {
             <Users size={32} className="text-blue-400" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white mb-2">Welcome back!</h1>
-            <p className="text-gray-400 mb-4">Going to your account...</p>
+            <h1 className="text-2xl font-bold text-white mb-2">Welcome back! 👋</h1>
+            <p className="text-gray-400 mb-4">You're logged in as a customer</p>
             <p className="text-sm text-gray-500">{user.email}</p>
           </div>
           <Link
@@ -91,6 +139,7 @@ export default function LandingPage() {
     );
   }
 
+  // ✅ If ADMIN is logged in - redirect to admin dashboard
   if (userType === 'admin' && user) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-4">
@@ -99,8 +148,8 @@ export default function LandingPage() {
             <Zap size={32} className="text-green-400" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold text-white mb-2">Welcome back, Admin!</h1>
-            <p className="text-gray-400 mb-4">Going to dashboard...</p>
+            <h1 className="text-2xl font-bold text-white mb-2">Welcome back, Admin! 🔥</h1>
+            <p className="text-gray-400 mb-4">You're logged in as an admin</p>
             <p className="text-sm text-gray-500">{user.email}</p>
           </div>
           <Link
@@ -121,7 +170,7 @@ export default function LandingPage() {
     );
   }
 
-  // Not logged in - show login options
+  // ✅ NOT logged in - show login options
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       {/* Header */}
@@ -131,7 +180,7 @@ export default function LandingPage() {
             <Zap size={28} className="text-blue-400" />
             <span className="text-2xl font-bold text-white">DropShip</span>
           </div>
-          <div className="text-gray-400 text-sm">Choose your role</div>
+          <div className="text-gray-400 text-sm">Choose your role to login</div>
         </div>
       </div>
 
