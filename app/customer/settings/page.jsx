@@ -207,7 +207,7 @@ function SettingsContent() {
       <div className="sticky top-0 z-40 bg-slate-800/50 border-b border-slate-700 backdrop-blur">
         <div className="max-w-4xl mx-auto px-6 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <Link href="/customer/dashboard" className="p-2 hover:bg-slate-700 rounded-lg transition">
+            <Link href="/customer/account" className="p-2 hover:bg-slate-700 rounded-lg transition">
               <ArrowLeft size={20} className="text-gray-400" />
             </Link>
             <div>
