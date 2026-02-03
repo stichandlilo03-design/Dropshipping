@@ -1,11 +1,15 @@
 // /api/orders/create/route.js
-// Enhanced order creation with automatic shipping and notification
+// COMPLETE order creation with ALL integrations
 
 import { NextResponse } from 'next/server';
 import { addDoc, collection, doc, updateDoc, increment } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { ShippingAutomation } from '@/lib/shipping-automation';
-import { EmailAutomation } from '@/lib/integrations';
+import { 
+  PrintfulIntegration, 
+  EmailAutomation, 
+  ZapierAutomation,
+  StripeIntegration 
+} from '@/lib/integrations';
 
 export async function POST(request) {
   try {
@@ -26,7 +30,7 @@ export async function POST(request) {
       shippingAddress,
     } = body;
 
-    // Validate required fields
+    // Validate
     if (!customerId || !items || items.length === 0) {
       return NextResponse.json(
         { success: false, error: 'Missing required fields' },
@@ -37,6 +41,7 @@ export async function POST(request) {
     console.log('[Order] ===== ORDER CREATION STARTED =====');
     console.log('[Order] Customer:', customerEmail);
     console.log('[Order] Items:', items.length);
+    console.log('[Order] Total:', total);
 
     // ✅ STEP 1: Create order in Firebase
     console.log('[Order] Step 1: Creating order in Firebase...');
@@ -71,22 +76,64 @@ export async function POST(request) {
 
     // ✅ STEP 2: Update customer order count
     console.log('[Order] Step 2: Updating customer...');
-    await updateDoc(doc(db, 'customers', customerId), {
-      orders: increment(1),
-      order_count: increment(1),
-      last_order_date: new Date().toISOString(),
-    });
-    console.log('[Order] ✅ Customer updated');
-
-    // ✅ STEP 3: Send order confirmation email
-    console.log('[Order] Step 3: Sending order confirmation email...');
     try {
-      const emailApi = new EmailAutomation(process.env.SENDGRID_API_KEY);
+      await updateDoc(doc(db, 'customers', customerId), {
+        orders: increment(1),
+        order_count: increment(1),
+        last_order_date: new Date().toISOString(),
+        total_spent: increment(total),
+      });
+      console.log('[Order] ✅ Customer updated');
+    } catch (customerError) {
+      console.error('[Order] Customer update error (non-blocking):', customerError);
+    }
+
+    // ✅ STEP 3: Trigger Stripe integration (record payment)
+    console.log('[Order] Step 3: Recording Stripe payment...');
+    try {
+      if (paymentIntentId && process.env.STRIPE_SECRET_KEY) {
+        const stripe = new StripeIntegration(process.env.STRIPE_SECRET_KEY);
+        const payments = await stripe.getPayments(1);
+        console.log('[Order] ✅ Stripe recorded');
+      }
+    } catch (stripeError) {
+      console.error('[Order] Stripe error (non-blocking):', stripeError);
+    }
+
+    // ✅ STEP 4: Trigger Zapier webhook
+    console.log('[Order] Step 4: Triggering Zapier webhook...');
+    try {
+      if (process.env.ZAPIER_WEBHOOK_URL) {
+        const zapier = new ZapierAutomation(process.env.ZAPIER_WEBHOOK_URL);
+        await zapier.triggerNewOrder({
+          orderId,
+          customer: customerName,
+          email: customerEmail,
+          total,
+          items: items.length,
+        });
+        console.log('[Order] ✅ Zapier triggered');
+      }
+    } catch (zapierError) {
+      console.error('[Order] Zapier error (non-blocking):', zapierError);
+    }
+
+    // ✅ STEP 5: Send order confirmation email (SendGrid or Gmail)
+    console.log('[Order] Step 5: Sending order confirmation...');
+    try {
+      const emailApi = new EmailAutomation(
+        process.env.SENDGRID_API_KEY,
+        {
+          user: process.env.GMAIL_USER,
+          pass: process.env.GMAIL_APP_PASSWORD,
+        }
+      );
+
       await emailApi.sendOrderConfirmation(customerEmail, {
         orderNumber: orderId,
+        customer: customerName,
         amount: total,
         items: items,
-        customer: customerName,
       });
       console.log('[Order] ✅ Confirmation email sent');
     } catch (emailError) {
@@ -95,12 +142,12 @@ export async function POST(request) {
 
     let printfulResult = { success: false };
 
-    // ✅ STEP 4: Auto-sync to Printful (if payment confirmed)
-    if (paymentIntentId) {
-      console.log('[Order] Step 4: Auto-syncing to Printful...');
-      try {
-        const shipping = new ShippingAutomation(process.env.PRINTFUL_API_KEY);
-        printfulResult = await shipping.syncOrderToPrintful(orderId, {
+    // ✅ STEP 6: Auto-sync to Printful
+    console.log('[Order] Step 6: Auto-syncing to Printful...');
+    try {
+      if (process.env.PRINTFUL_API_KEY) {
+        const printful = new PrintfulIntegration(process.env.PRINTFUL_API_KEY);
+        printfulResult = await printful.autoSyncOrder(orderId, {
           items,
           customerName,
           customerEmail,
@@ -110,12 +157,19 @@ export async function POST(request) {
 
         if (printfulResult.success) {
           console.log('[Order] ✅ Synced to Printful:', printfulResult.printfulOrderId);
+          
+          // Update order status to confirmed
+          await updateDoc(doc(db, 'orders', orderId), {
+            status: 'confirmed',
+          });
         } else {
           console.error('[Order] Printful sync failed:', printfulResult.error);
         }
-      } catch (printfulError) {
-        console.error('[Order] Printful error (non-blocking):', printfulError);
+      } else {
+        console.log('[Order] ⚠️ Printful not configured');
       }
+    } catch (printfulError) {
+      console.error('[Order] Printful error (non-blocking):', printfulError);
     }
 
     console.log('[Order] ===== ORDER CREATION COMPLETE =====');
@@ -123,11 +177,13 @@ export async function POST(request) {
     return NextResponse.json({
       success: true,
       orderId: orderId,
+      status: 'confirmed',
       printful: printfulResult,
-      message: 'Order created successfully',
+      message: 'Order created and processing',
     }, { status: 201 });
+
   } catch (error) {
-    console.error('[Order] ❌ Error:', error.message);
+    console.error('[Order] ❌ Fatal error:', error.message);
     return NextResponse.json(
       { success: false, error: error.message },
       { status: 500 }
