@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { LogOut, ShoppingCart, Package, Clock, CheckCircle, XCircle, Eye, Zap, Heart, Star, TrendingUp, Bell, Settings, Home, BarChart3, Gift, Truck, Menu, X, Check, Store } from 'lucide-react';
-import { collection, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, updateDoc, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 function CustomerDashboardContent() {
@@ -104,11 +104,13 @@ function CustomerDashboardContent() {
         }
       }
 
+      // ✅ Load cart from localStorage
       const cartData = localStorage.getItem('cart');
       if (cartData) {
         try {
           const parsedCart = JSON.parse(cartData);
           setCart(Array.isArray(parsedCart) ? parsedCart : []);
+          console.log('[Dashboard] Cart loaded from localStorage:', parsedCart);
         } catch (err) {
           console.error('Error parsing cart:', err);
         }
@@ -125,6 +127,52 @@ function CustomerDashboardContent() {
       setLoading(false);
     }
   };
+
+  // ✅ SAVE CART TO BOTH localStorage AND Firestore
+  useEffect(() => {
+    if (!customer || !customer.id) return;
+
+    const saveCartAsync = async () => {
+      try {
+        // Save to localStorage
+        if (cart.length > 0) {
+          localStorage.setItem('cart', JSON.stringify(cart));
+          console.log('[Dashboard] Cart saved to localStorage:', cart);
+        } else {
+          localStorage.removeItem('cart');
+          console.log('[Dashboard] Cart cleared from localStorage');
+        }
+
+        // Save to Firestore
+        const cartDocRef = doc(db, 'customers', customer.id, 'cart', 'items');
+        
+        if (cart.length > 0) {
+          const cartData = {
+            items: cart,
+            lastUpdated: new Date().toISOString(),
+            total: cart.reduce((sum, item) => sum + (parseFloat(item.price || 0) * item.quantity), 0),
+            itemCount: cart.length,
+          };
+          
+          await setDoc(cartDocRef, cartData, { merge: true });
+          console.log('[Dashboard] ✅ Cart saved to Firestore:', cartData);
+        } else {
+          // Delete from Firestore when cart is empty
+          try {
+            await deleteDoc(cartDocRef);
+            console.log('[Dashboard] Cart deleted from Firestore');
+          } catch (deleteErr) {
+            console.log('[Dashboard] Cart already deleted or does not exist');
+          }
+        }
+      } catch (err) {
+        console.error('[Dashboard] Error saving cart to Firestore:', err);
+        // Don't fail if Firestore fails - cart is still in localStorage
+      }
+    };
+
+    saveCartAsync();
+  }, [cart, customer]);
 
   const loadWishlistFromFirestore = async (customerId) => {
     try {
@@ -282,7 +330,7 @@ function CustomerDashboardContent() {
       ];
     }
 
-    localStorage.setItem('cart', JSON.stringify(updatedCart));
+    // This triggers the useEffect that saves to both localStorage and Firestore
     setCart(updatedCart);
 
     setAddedItem(product.id);
