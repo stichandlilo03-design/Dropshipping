@@ -1,10 +1,10 @@
 // /api/social/publish/route.js
-// Publish product to social media platforms
+// COMPLETE social media publishing with all platforms
 
 import { NextResponse } from 'next/server';
-import { SocialMediaAutomation } from '@/lib/social-media-automation';
-import { doc, updateDoc, arrayUnion } from 'firebase/firestore';
+import { doc, updateDoc, arrayUnion, increment } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { SocialMediaAutomation } from '@/lib/integrations';
 
 export async function POST(request) {
   try {
@@ -22,7 +22,15 @@ export async function POST(request) {
     console.log('[Social API] Product:', productName);
     console.log('[Social API] Platforms:', platforms);
 
-    // Get credentials from environment
+    if (!productId || !platforms || platforms.length === 0) {
+      return NextResponse.json(
+        { success: false, error: 'Missing product or platforms' },
+        { status: 400 }
+      );
+    }
+
+    // ✅ STEP 1: Get platform credentials
+    console.log('[Social API] Step 1: Loading credentials...');
     const credentials = {
       tiktok: {
         accessToken: process.env.TIKTOK_ACCESS_TOKEN,
@@ -42,12 +50,12 @@ export async function POST(request) {
       },
     };
 
-    // ✅ STEP 1: Initialize social media automation
-    console.log('[Social API] Step 1: Initializing automation...');
+    // ✅ STEP 2: Initialize social media automation
+    console.log('[Social API] Step 2: Initializing automation...');
     const social = new SocialMediaAutomation(credentials);
 
-    // ✅ STEP 2: Publish to selected platforms
-    console.log('[Social API] Step 2: Publishing to platforms...');
+    // ✅ STEP 3: Publish to all selected platforms
+    console.log('[Social API] Step 3: Publishing to platforms...');
     const publishResults = await social.publishToAll(
       {
         id: productId,
@@ -60,8 +68,10 @@ export async function POST(request) {
       platforms
     );
 
-    // ✅ STEP 3: Update product with social post records
-    console.log('[Social API] Step 3: Updating product social posts...');
+    console.log('[Social API] Publishing results:', publishResults);
+
+    // ✅ STEP 4: Update product with social post records
+    console.log('[Social API] Step 4: Updating product database...');
     try {
       const successfulPosts = publishResults.results.filter(r => r.success);
 
@@ -76,25 +86,53 @@ export async function POST(request) {
             })),
           }),
           last_social_post: new Date().toISOString(),
+          social_post_count: increment(1),
         });
-        console.log('[Social API] ✅ Updated product with social posts');
+        console.log('[Social API] ✅ Product updated with', successfulPosts.length, 'posts');
       }
     } catch (updateError) {
-      console.error('[Social API] Error updating product (non-blocking):', updateError);
+      console.error('[Social API] Product update error (non-blocking):', updateError);
     }
 
-    // ✅ STEP 4: Log analytics
-    console.log('[Social API] Step 4: Logging analytics...');
+    // ✅ STEP 5: Log analytics to database
+    console.log('[Social API] Step 5: Logging analytics...');
     try {
       const successful = publishResults.results.filter(r => r.success).length;
-      await updateDoc(doc(db, 'analytics', 'social_posts'), {
+
+      // Create/update analytics document
+      const analyticsRef = doc(db, 'analytics', 'social_posts');
+      await updateDoc(analyticsRef, {
         total_posts: increment(1),
-        [`platform_${platforms[0]}`]: increment(1),
+        successful_posts: increment(successful),
+        failed_posts: increment(publishResults.results.length - successful),
         last_updated: new Date().toISOString(),
+        ...platforms.reduce((acc, platform) => {
+          acc[`platform_${platform}_count`] = increment(1);
+          return acc;
+        }, {}),
+      }).catch(async (error) => {
+        // If document doesn't exist, create it
+        if (error.code === 'not-found') {
+          console.log('[Social API] Creating analytics document...');
+          const analyticsData = {
+            total_posts: 1,
+            successful_posts: successful,
+            failed_posts: publishResults.results.length - successful,
+            created_at: new Date().toISOString(),
+            last_updated: new Date().toISOString(),
+          };
+          
+          platforms.forEach(platform => {
+            analyticsData[`platform_${platform}_count`] = 1;
+          });
+
+          await addDoc(collection(db, 'analytics'), analyticsData);
+        }
       });
+
       console.log('[Social API] ✅ Analytics logged');
     } catch (analyticsError) {
-      console.error('[Social API] Error logging analytics (non-blocking):', analyticsError);
+      console.error('[Social API] Analytics error (non-blocking):', analyticsError);
     }
 
     console.log('[Social API] ===== SOCIAL PUBLISH COMPLETE =====');
@@ -103,9 +141,15 @@ export async function POST(request) {
       success: publishResults.success,
       results: publishResults.results,
       message: publishResults.message,
+      stats: {
+        total: publishResults.results.length,
+        successful: publishResults.results.filter(r => r.success).length,
+        failed: publishResults.results.filter(r => !r.success).length,
+      },
     });
+
   } catch (error) {
-    console.error('[Social API] ❌ Error:', error.message);
+    console.error('[Social API] ❌ Fatal error:', error.message);
     return NextResponse.json(
       { success: false, error: error.message },
       { status: 500 }
