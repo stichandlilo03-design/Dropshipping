@@ -918,24 +918,33 @@ function CustomerDashboardContent() {
 
       {/* Floating Cart - Responsive */}
       {cartCount > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 sm:bottom-6 sm:right-6 sm:left-auto z-40 sm:w-auto">
+        <>
+          {/* MOBILE VERSION - Full width at bottom */}
+          <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900 border-t border-slate-700">
+            <Link
+              href="/checkout"
+              className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-4 transition relative"
+            >
+              <ShoppingCart size={20} />
+              <span>View Cart</span>
+              <span className="absolute right-4 top-2 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+                {cartCount}
+              </span>
+            </Link>
+          </div>
+
+          {/* DESKTOP VERSION - Floating in corner */}
           <Link
             href="/checkout"
-            className="w-full sm:w-auto flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 sm:px-6 py-4 sm:py-3 sm:rounded-full rounded-t-xl shadow-lg transition relative"
+            className="hidden sm:flex fixed bottom-6 right-6 z-40 items-center justify-center gap-3 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-full shadow-lg transition relative"
           >
-            <ShoppingCart size={20} className="sm:hidden" />
-            <ShoppingCart size={24} className="hidden sm:block" />
-            <span className="sm:hidden">
-              View Cart ({cartCount})
-            </span>
-            <span className="hidden sm:inline">
-              Cart
-            </span>
+            <ShoppingCart size={24} />
+            <span className="font-semibold">Cart</span>
             <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">
               {cartCount}
             </span>
           </Link>
-        </div>
+        </>
       )}
     </div>
   );
