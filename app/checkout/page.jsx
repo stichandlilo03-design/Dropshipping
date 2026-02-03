@@ -14,6 +14,10 @@ function CheckoutContent() {
   const [error, setError] = useState(null);
   const [activeTab, setActiveTab] = useState('orders');
 
+  // Constants for calculations
+  const SHIPPING_COST = 10.0;
+  const TAX_RATE = 0.08;
+
   useEffect(() => {
     // Get customer from localStorage
     const customerData = localStorage.getItem('customer');
@@ -39,9 +43,25 @@ function CheckoutContent() {
     setLoading(false);
   }, [router]);
 
-  const subtotal = cart.reduce((sum, item) => sum + (parseFloat(item.price) * (item.quantity || 1)), 0);
-  const tax = subtotal * 0.08;
-  const total = subtotal + tax;
+  // Fixed calculation function
+  const calculateAmounts = () => {
+    const subtotal = cart.reduce((sum, item) => {
+      return sum + (parseFloat(item.price || 0) * (parseInt(item.quantity) || 1));
+    }, 0);
+
+    const tax = subtotal * TAX_RATE;
+    const shipping = SHIPPING_COST;
+    const total = subtotal + tax + shipping;
+
+    return {
+      subtotal: parseFloat(subtotal.toFixed(2)),
+      tax: parseFloat(tax.toFixed(2)),
+      shipping: shipping,
+      total: parseFloat(total.toFixed(2)),
+    };
+  };
+
+  const amounts = calculateAmounts();
 
   const handleCheckout = async () => {
     if (!customer) {
@@ -58,6 +78,8 @@ function CheckoutContent() {
       setLoading(true);
       setError(null);
 
+      console.log('[Checkout] Sending amounts to API:', amounts);
+
       const response = await fetch('/api/stripe/checkout', {
         method: 'POST',
         headers: {
@@ -71,9 +93,11 @@ function CheckoutContent() {
             firstName: customer.firstName,
             phone: customer.phone,
           },
-          subtotal: subtotal.toFixed(2),
-          tax: tax.toFixed(2),
-          total: total.toFixed(2),
+          // FIXED: Send correct amounts
+          subtotal: amounts.subtotal,
+          tax: amounts.tax,
+          shipping: amounts.shipping,
+          total: amounts.total,
           shippingAddress: {
             street: '',
             city: '',
@@ -193,22 +217,22 @@ function CheckoutContent() {
               <div className="space-y-3 mb-6">
                 <div className="flex justify-between text-gray-400">
                   <span>Subtotal</span>
-                  <span>${subtotal.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-gray-400">
-                  <span>Tax (8%)</span>
-                  <span>${tax.toFixed(2)}</span>
+                  <span>${amounts.subtotal.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-gray-400">
                   <span>Shipping</span>
-                  <span className="text-green-400">FREE</span>
+                  <span>${amounts.shipping.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between text-gray-400">
+                  <span>Tax (8%)</span>
+                  <span>${amounts.tax.toFixed(2)}</span>
                 </div>
               </div>
 
               <div className="border-t border-slate-700 pt-6 mb-6">
                 <div className="flex justify-between">
                   <span className="text-lg font-bold text-white">Total</span>
-                  <span className="text-2xl font-bold text-green-400">${total.toFixed(2)}</span>
+                  <span className="text-2xl font-bold text-green-400">${amounts.total.toFixed(2)}</span>
                 </div>
               </div>
 
