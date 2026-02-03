@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, LogOut, ShoppingCart, Package, Clock, CheckCircle, XCircle, Eye, Zap, Heart, Star, TrendingUp, Search, Bell, Settings, Home, BarChart3, Gift, Truck } from 'lucide-react';
-import { collection, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 function CustomerDashboardContent() {
@@ -39,11 +39,8 @@ function CustomerDashboardContent() {
       const parsedCustomer = JSON.parse(customerData);
       setCustomer(parsedCustomer);
 
-      // Load wishlist from localStorage
-      const savedWishlist = localStorage.getItem('wishlist');
-      if (savedWishlist) {
-        setWishlist(JSON.parse(savedWishlist));
-      }
+      // Load wishlist from Firestore (cloud-synced)
+      await loadWishlistFromFirestore(parsedCustomer.id);
 
       // Load unread notifications count
       const savedNotifications = localStorage.getItem('notifications');
@@ -70,6 +67,29 @@ function CustomerDashboardContent() {
     } catch (error) {
       console.error('[Dashboard] Error:', error);
       setLoading(false);
+    }
+  };
+
+  const loadWishlistFromFirestore = async (customerId) => {
+    try {
+      const customerRef = doc(db, 'customers', customerId);
+      const customerSnap = await getDoc(customerRef);
+
+      if (customerSnap.exists()) {
+        const wishlistData = customerSnap.data().wishlist || [];
+        setWishlist(wishlistData);
+        console.log('[Wishlist] Loaded from Firestore:', wishlistData);
+      } else {
+        console.log('[Wishlist] Customer document not found');
+        setWishlist([]);
+      }
+    } catch (error) {
+      console.error('[Wishlist] Error loading from Firestore:', error);
+      // Fallback to localStorage if Firestore fails
+      const savedWishlist = localStorage.getItem('wishlist');
+      if (savedWishlist) {
+        setWishlist(JSON.parse(savedWishlist));
+      }
     }
   };
 
@@ -145,14 +165,32 @@ function CustomerDashboardContent() {
     router.push('/');
   };
 
-  const toggleWishlist = (productId) => {
-    setWishlist((prev) => {
-      const updated = prev.includes(productId)
-        ? prev.filter((id) => id !== productId)
-        : [...prev, productId];
+  const toggleWishlist = async (productId) => {
+    try {
+      let updated;
+      if (wishlist.includes(productId)) {
+        updated = wishlist.filter((id) => id !== productId);
+      } else {
+        updated = [...wishlist, productId];
+      }
+
+      setWishlist(updated);
+
+      // Save to Firestore
+      if (customer) {
+        const customerRef = doc(db, 'customers', customer.id);
+        await updateDoc(customerRef, {
+          wishlist: updated,
+        });
+        console.log('[Wishlist] Synced to Firestore');
+      }
+
+      // Also save to localStorage as backup
       localStorage.setItem('wishlist', JSON.stringify(updated));
-      return updated;
-    });
+    } catch (error) {
+      console.error('[Wishlist] Error updating:', error);
+      // Still update local state even if Firestore fails
+    }
   };
 
   const handleContinuePayment = (order) => {
@@ -253,7 +291,7 @@ function CustomerDashboardContent() {
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {/* Notification Button - NOW CLICKABLE */}
+              {/* Notification Button */}
               <Link
                 href="/customer/notifications"
                 className="p-2 hover:bg-slate-700 rounded-lg transition relative group"
@@ -267,7 +305,7 @@ function CustomerDashboardContent() {
                 )}
               </Link>
 
-              {/* Settings Button - NOW CLICKABLE */}
+              {/* Settings Button */}
               <Link
                 href="/customer/settings"
                 className="p-2 hover:bg-slate-700 rounded-lg transition"
@@ -275,6 +313,8 @@ function CustomerDashboardContent() {
               >
                 <Settings size={20} className="text-gray-400 hover:text-blue-400" />
               </Link>
+
+              {/* Logout Button */}
               <button onClick={handleLogout} className="p-2 hover:bg-red-500/20 rounded-lg transition text-red-400">
                 <LogOut size={20} />
               </button>
