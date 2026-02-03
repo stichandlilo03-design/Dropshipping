@@ -21,11 +21,14 @@ export async function POST(request) {
 
     console.log('[Checkout API] Raw body:', JSON.stringify(body, null, 2));
 
-    const { cartItems, customer, subtotal, tax, total, shippingAddress } = body;
+    const { cartItems, customer, subtotal, tax, shipping, total, shippingAddress } = body;
 
     console.log('[Checkout API] Parsed values:');
     console.log('  - cartItems length:', cartItems?.length);
     console.log('  - customer:', customer);
+    console.log('  - subtotal:', subtotal);
+    console.log('  - tax:', tax);
+    console.log('  - shipping:', shipping);
     console.log('  - total:', total);
 
     // Validate required fields
@@ -95,7 +98,52 @@ export async function POST(request) {
         };
       });
 
-      console.log('[Checkout API] Valid cart items:', validCart.length);
+      // Add shipping as line item
+      const shippingAmount = parseFloat(shipping || 0);
+      const taxAmount = parseFloat(tax || 0);
+
+      const lineItems = [
+        ...validCart,
+        // Add shipping if not zero
+        ...(shippingAmount > 0 ? [{
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: 'Shipping',
+            },
+            unit_amount: Math.round(shippingAmount * 100),
+          },
+          quantity: 1,
+        }] : []),
+        // Add tax if not zero
+        ...(taxAmount > 0 ? [{
+          price_data: {
+            currency: 'usd',
+            product_data: {
+              name: 'Tax',
+            },
+            unit_amount: Math.round(taxAmount * 100),
+          },
+          quantity: 1,
+        }] : []),
+      ];
+
+      console.log('[Checkout API] Line items for Stripe:', lineItems.length, 'items');
+      console.log('  - Products:', validCart.length);
+      console.log('  - Shipping:', shippingAmount > 0 ? '✓' : '✗');
+      console.log('  - Tax:', taxAmount > 0 ? '✓' : '✗');
+
+      // Calculate total from line items to verify
+      const calculatedTotal = lineItems.reduce((sum, item) => {
+        return sum + (item.price_data.unit_amount * item.quantity);
+      }, 0);
+
+      const expectedTotalInCents = Math.round(totalAmount * 100);
+
+      console.log('[Checkout API] Total verification:');
+      console.log('  - Expected (cents):', expectedTotalInCents);
+      console.log('  - Calculated (cents):', calculatedTotal);
+      console.log('  - Match:', calculatedTotal === expectedTotalInCents ? '✓' : '✗');
 
       // Save PENDING order BEFORE creating Stripe session
       console.log('[Checkout API] Saving PENDING order to Firestore...');
@@ -112,14 +160,23 @@ export async function POST(request) {
           quantity: parseInt(item.quantity) || 1,
           image: item.image,
         })),
+        // FIXED: All amounts included
         subtotal: parseFloat(subtotal || 0),
-        tax: parseFloat(tax || 0),
+        shipping: shippingAmount,
+        tax: taxAmount,
         total: totalAmount,
         shippingAddress: shippingAddress || {},
-        status: 'pending_payment', // 🔑 PENDING STATUS!
+        status: 'pending_payment',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
+
+      console.log('[Checkout API] Pending order data:', {
+        subtotal: pendingOrderData.subtotal,
+        shipping: pendingOrderData.shipping,
+        tax: pendingOrderData.tax,
+        total: pendingOrderData.total,
+      });
 
       let pendingOrderId = null;
       try {
@@ -135,7 +192,7 @@ export async function POST(request) {
       console.log('[Checkout API] Creating Stripe session...');
       const session = await stripe.checkout.sessions.create({
         payment_method_types: ['card'],
-        line_items: validCart,
+        line_items: lineItems,
         mode: 'payment',
         success_url: `${process.env.NEXT_PUBLIC_DOMAIN || 'https://www.dropshipwithmonk.sbs'}/checkout/success?session_id={CHECKOUT_SESSION_ID}&order_id=${pendingOrderId || 'unknown'}`,
         cancel_url: `${process.env.NEXT_PUBLIC_DOMAIN || 'https://www.dropshipwithmonk.sbs'}/checkout/cancel`,
@@ -149,11 +206,19 @@ export async function POST(request) {
       });
 
       console.log('[Checkout API] Stripe session created:', session.id);
+      console.log('[Checkout API] Stripe session amount total:', session.amount_total, 'cents (expected:', expectedTotalInCents, ')');
+
+      // Verify amounts match
+      if (session.amount_total !== expectedTotalInCents) {
+        console.warn('[Checkout API] ⚠️ Amount mismatch!', {
+          expected: expectedTotalInCents,
+          actual: session.amount_total,
+        });
+      }
 
       // Update pending order with Stripe session ID
       if (pendingOrderId) {
         try {
-          // Store session ID in metadata for later reference
           console.log('[Checkout API] Pending order linked with Stripe session:', session.id);
         } catch (err) {
           console.error('[Checkout API] Error linking session (non-critical):', err.message);
@@ -167,6 +232,7 @@ export async function POST(request) {
         sessionId: session.id,
         clientSecret: session.client_secret,
         orderId: pendingOrderId,
+        amountTotal: session.amount_total,
         message: 'Checkout session created successfully',
       }, { status: 200 });
 
