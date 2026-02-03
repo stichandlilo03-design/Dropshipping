@@ -3,24 +3,23 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, LogOut, ShoppingCart, Package, Clock, CheckCircle, XCircle, Eye, Zap, Heart, Star, TrendingUp, Search, Bell, Settings, Home, BarChart3, Gift, Truck } from 'lucide-react';
-import { collection, getDocs, doc, getDoc, updateDoc, setDoc } from 'firebase/firestore';
+import { LogOut, ShoppingCart, Package, Clock, CheckCircle, XCircle, Eye, Zap, Heart, Star, TrendingUp, Bell, Settings, Home, BarChart3, Gift, Truck, Menu, X } from 'lucide-react';
+import { collection, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 function CustomerDashboardContent() {
   const router = useRouter();
   const [customer, setCustomer] = useState(null);
   const [orders, setOrders] = useState([]);
-  const [filteredOrders, setFilteredOrders] = useState([]);
   const [trendingProducts, setTrendingProducts] = useState([]);
   const [recommendedProducts, setRecommendedProducts] = useState([]);
   const [wishlist, setWishlist] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
-  const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   useEffect(() => {
     loadCustomerData();
@@ -39,10 +38,8 @@ function CustomerDashboardContent() {
       const parsedCustomer = JSON.parse(customerData);
       setCustomer(parsedCustomer);
 
-      // Load wishlist from Firestore (cloud-synced)
       await loadWishlistFromFirestore(parsedCustomer.id);
 
-      // Load unread notifications count
       const savedNotifications = localStorage.getItem('notifications');
       if (savedNotifications) {
         try {
@@ -54,13 +51,8 @@ function CustomerDashboardContent() {
         }
       }
 
-      // Load orders
       await loadCustomerOrders(parsedCustomer.id, parsedCustomer.email);
-
-      // Load trending products
       await loadTrendingProducts();
-
-      // Load recommended products
       await loadRecommendedProducts();
 
       setLoading(false);
@@ -78,14 +70,11 @@ function CustomerDashboardContent() {
       if (customerSnap.exists()) {
         const wishlistData = customerSnap.data().wishlist || [];
         setWishlist(wishlistData);
-        console.log('[Wishlist] Loaded from Firestore:', wishlistData);
       } else {
-        console.log('[Wishlist] Customer document not found');
         setWishlist([]);
       }
     } catch (error) {
       console.error('[Wishlist] Error loading from Firestore:', error);
-      // Fallback to localStorage if Firestore fails
       const savedWishlist = localStorage.getItem('wishlist');
       if (savedWishlist) {
         setWishlist(JSON.parse(savedWishlist));
@@ -113,7 +102,6 @@ function CustomerDashboardContent() {
 
       loadedOrders.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
       setOrders(loadedOrders);
-      setFilteredOrders(loadedOrders.slice(0, 5));
     } catch (error) {
       console.error('[Orders] Error:', error);
     }
@@ -176,20 +164,16 @@ function CustomerDashboardContent() {
 
       setWishlist(updated);
 
-      // Save to Firestore
       if (customer) {
         const customerRef = doc(db, 'customers', customer.id);
         await updateDoc(customerRef, {
           wishlist: updated,
         });
-        console.log('[Wishlist] Synced to Firestore');
       }
 
-      // Also save to localStorage as backup
       localStorage.setItem('wishlist', JSON.stringify(updated));
     } catch (error) {
       console.error('[Wishlist] Error updating:', error);
-      // Still update local state even if Firestore fails
     }
   };
 
@@ -257,11 +241,11 @@ function CustomerDashboardContent() {
 
   if (!customer) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
-        <div className="max-w-md w-full bg-slate-800 rounded-lg border border-slate-700 p-8 text-center space-y-6">
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-4">
+        <div className="max-w-md w-full bg-slate-800 rounded-lg border border-slate-700 p-6 sm:p-8 text-center space-y-6">
           <h1 className="text-2xl font-bold text-white">Not Logged In</h1>
           <p className="text-gray-400">Please login to continue</p>
-          <Link href="/customer/login" className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold block">
+          <Link href="/customer/login" className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold block transition">
             Go to Login
           </Link>
         </div>
@@ -277,21 +261,24 @@ function CustomerDashboardContent() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
-      {/* Header */}
+      {/* ===== TOP HEADER ===== */}
       <div className="sticky top-0 z-40 bg-slate-800/50 border-b border-slate-700 backdrop-blur">
-        <div className="max-w-7xl mx-auto px-6 py-4">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
+          {/* Header Top Row */}
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-4">
-              <Link href="/" className="p-2 hover:bg-slate-700 rounded-lg transition">
+            {/* Left: Home & Title */}
+            <div className="flex items-center gap-3 min-w-0">
+              <Link href="/" className="p-2 hover:bg-slate-700 rounded-lg transition flex-shrink-0">
                 <Home size={20} className="text-gray-400" />
               </Link>
-              <div>
-                <h1 className="text-2xl font-bold text-white">👤 Dashboard</h1>
-                <p className="text-xs text-gray-400">Welcome back, {customer.firstName}!</p>
+              <div className="min-w-0">
+                <h1 className="text-xl sm:text-2xl font-bold text-white truncate">👤 Dashboard</h1>
+                <p className="text-xs sm:text-sm text-gray-400 truncate">Welcome, {customer.firstName}!</p>
               </div>
             </div>
-            <div className="flex items-center gap-2">
-              {/* Notification Button */}
+
+            {/* Right: Icons (Desktop) */}
+            <div className="hidden sm:flex items-center gap-1">
               <Link
                 href="/customer/notifications"
                 className="p-2 hover:bg-slate-700 rounded-lg transition relative group"
@@ -299,13 +286,12 @@ function CustomerDashboardContent() {
               >
                 <Bell size={20} className="text-gray-400 group-hover:text-yellow-400" />
                 {unreadNotifications > 0 && (
-                  <span className="absolute top-1 right-1 w-5 h-5 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                  <span className="absolute top-1 right-1 w-4 h-4 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
                     {unreadNotifications > 9 ? '9+' : unreadNotifications}
                   </span>
                 )}
               </Link>
 
-              {/* Settings Button */}
               <Link
                 href="/customer/settings"
                 className="p-2 hover:bg-slate-700 rounded-lg transition"
@@ -314,157 +300,170 @@ function CustomerDashboardContent() {
                 <Settings size={20} className="text-gray-400 hover:text-blue-400" />
               </Link>
 
-              {/* Logout Button */}
               <button onClick={handleLogout} className="p-2 hover:bg-red-500/20 rounded-lg transition text-red-400">
                 <LogOut size={20} />
               </button>
             </div>
+
+            {/* Mobile Menu Button */}
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="sm:hidden p-2 hover:bg-slate-700 rounded-lg transition"
+            >
+              {mobileMenuOpen ? <X size={20} className="text-gray-400" /> : <Menu size={20} className="text-gray-400" />}
+            </button>
           </div>
 
-          {/* Tabs */}
-          <div className="flex gap-2 overflow-x-auto">
-            <button
-              onClick={() => setActiveTab('overview')}
-              className={`px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap text-sm ${
-                activeTab === 'overview'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-700 hover:bg-slate-600 text-gray-300'
-              }`}
-            >
-              <BarChart3 size={16} className="inline mr-2" />
-              Overview
-            </button>
-            <button
-              onClick={() => setActiveTab('orders')}
-              className={`px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap text-sm ${
-                activeTab === 'orders'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-700 hover:bg-slate-600 text-gray-300'
-              }`}
-            >
-              <ShoppingCart size={16} className="inline mr-2" />
-              Orders ({orders.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('tracking')}
-              className={`px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap text-sm ${
-                activeTab === 'tracking'
-                  ? 'bg-purple-600 text-white'
-                  : 'bg-slate-700 hover:bg-slate-600 text-gray-300'
-              }`}
-            >
-              <Truck size={16} className="inline mr-2" />
-              Track Orders
-            </button>
-            <button
-              onClick={() => setActiveTab('wishlist')}
-              className={`px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap text-sm ${
-                activeTab === 'wishlist'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-700 hover:bg-slate-600 text-gray-300'
-              }`}
-            >
-              <Heart size={16} className="inline mr-2" />
-              Wishlist ({wishlist.length})
-            </button>
-            <button
-              onClick={() => setActiveTab('trending')}
-              className={`px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap text-sm ${
-                activeTab === 'trending'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-700 hover:bg-slate-600 text-gray-300'
-              }`}
-            >
-              <TrendingUp size={16} className="inline mr-2" />
-              Trending
-            </button>
+          {/* Mobile Menu */}
+          {mobileMenuOpen && (
+            <div className="sm:hidden mb-4 pb-4 border-t border-slate-700 pt-4 space-y-2">
+              <Link
+                href="/customer/notifications"
+                className="flex items-center gap-2 p-2 hover:bg-slate-700 rounded-lg transition text-gray-300"
+              >
+                <Bell size={18} />
+                <span className="flex-1">Notifications</span>
+                {unreadNotifications > 0 && (
+                  <span className="bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+                    {unreadNotifications}
+                  </span>
+                )}
+              </Link>
+
+              <Link
+                href="/customer/settings"
+                className="flex items-center gap-2 p-2 hover:bg-slate-700 rounded-lg transition text-gray-300"
+              >
+                <Settings size={18} />
+                <span>Settings</span>
+              </Link>
+
+              <button
+                onClick={() => {
+                  handleLogout();
+                  setMobileMenuOpen(false);
+                }}
+                className="flex items-center gap-2 p-2 hover:bg-red-500/20 rounded-lg transition text-red-400 w-full"
+              >
+                <LogOut size={18} />
+                <span>Logout</span>
+              </button>
+            </div>
+          )}
+
+          {/* Navigation Tabs */}
+          <div className="flex gap-2 overflow-x-auto pb-2 sm:pb-0 -mx-4 sm:mx-0 px-4 sm:px-0">
+            {[
+              { id: 'overview', icon: BarChart3, label: 'Overview' },
+              { id: 'orders', icon: ShoppingCart, label: `Orders (${orders.length})` },
+              { id: 'tracking', icon: Truck, label: 'Tracking' },
+              { id: 'wishlist', icon: Heart, label: `Wishlist (${wishlist.length})` },
+              { id: 'trending', icon: TrendingUp, label: 'Trending' },
+            ].map(({ id, icon: Icon, label }) => (
+              <button
+                key={id}
+                onClick={() => {
+                  setActiveTab(id);
+                  setMobileMenuOpen(false);
+                }}
+                className={`flex items-center gap-1 px-3 sm:px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap text-sm ${
+                  activeTab === id
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-slate-700 hover:bg-slate-600 text-gray-300'
+                }`}
+              >
+                <Icon size={16} />
+                {label}
+              </button>
+            ))}
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      {/* ===== MAIN CONTENT ===== */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
         {/* OVERVIEW TAB */}
         {activeTab === 'overview' && (
-          <div className="space-y-8">
+          <div className="space-y-6">
             {/* Profile Card */}
-            <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-lg p-6 text-white">
-              <h2 className="text-2xl font-bold mb-2">{customer.firstName} {customer.lastName}</h2>
-              <p className="text-blue-100">{customer.email}</p>
-              <p className="text-blue-100 text-sm mt-1">{customer.phone || 'No phone number'}</p>
+            <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-6 text-white">
+              <h2 className="text-2xl sm:text-3xl font-bold mb-2">{customer.firstName} {customer.lastName}</h2>
+              <p className="text-blue-100 text-sm sm:text-base">{customer.email}</p>
+              <p className="text-blue-100 text-xs sm:text-sm mt-2">{customer.phone || 'No phone number'}</p>
             </div>
 
             {/* Stats Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+              <div className="bg-slate-800 rounded-lg border border-slate-700 p-4 sm:p-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-gray-400 text-sm">Total Orders</p>
-                  <ShoppingCart size={20} className="text-blue-400" />
+                  <p className="text-gray-400 text-xs sm:text-sm">Total Orders</p>
+                  <ShoppingCart size={18} className="text-blue-400 flex-shrink-0" />
                 </div>
-                <p className="text-3xl font-bold text-white">{orders.length}</p>
+                <p className="text-2xl sm:text-3xl font-bold text-white">{orders.length}</p>
               </div>
 
-              <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
+              <div className="bg-slate-800 rounded-lg border border-slate-700 p-4 sm:p-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-gray-400 text-sm">Total Spent</p>
-                  <Gift size={20} className="text-green-400" />
+                  <p className="text-gray-400 text-xs sm:text-sm">Total Spent</p>
+                  <Gift size={18} className="text-green-400 flex-shrink-0" />
                 </div>
-                <p className="text-3xl font-bold text-green-400">${totalSpent.toFixed(2)}</p>
+                <p className="text-2xl sm:text-3xl font-bold text-green-400">${totalSpent.toFixed(2)}</p>
               </div>
 
-              <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
+              <div className="bg-slate-800 rounded-lg border border-slate-700 p-4 sm:p-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-gray-400 text-sm">Pending Orders</p>
-                  <Clock size={20} className="text-yellow-400" />
+                  <p className="text-gray-400 text-xs sm:text-sm">Pending</p>
+                  <Clock size={18} className="text-yellow-400 flex-shrink-0" />
                 </div>
-                <p className="text-3xl font-bold text-yellow-400">{pendingCount}</p>
+                <p className="text-2xl sm:text-3xl font-bold text-yellow-400">{pendingCount}</p>
               </div>
 
-              <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
+              <div className="bg-slate-800 rounded-lg border border-slate-700 p-4 sm:p-6">
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-gray-400 text-sm">Wishlist Items</p>
-                  <Heart size={20} className="text-red-400" />
+                  <p className="text-gray-400 text-xs sm:text-sm">Wishlist</p>
+                  <Heart size={18} className="text-red-400 flex-shrink-0" />
                 </div>
-                <p className="text-3xl font-bold text-red-400">{wishlist.length}</p>
+                <p className="text-2xl sm:text-3xl font-bold text-red-400">{wishlist.length}</p>
               </div>
             </div>
 
             {/* Recent Orders */}
             <div>
-              <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+              <h3 className="text-lg sm:text-xl font-bold text-white mb-4 flex items-center gap-2">
                 <Clock size={20} />
                 Recent Orders
               </h3>
               <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
                 <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
+                  <table className="w-full text-xs sm:text-sm">
                     <thead>
                       <tr className="border-b border-slate-700 bg-slate-900/50">
-                        <th className="px-4 py-3 text-left text-gray-400 font-semibold">Order ID</th>
-                        <th className="px-4 py-3 text-left text-gray-400 font-semibold">Items</th>
-                        <th className="px-4 py-3 text-left text-gray-400 font-semibold">Total</th>
-                        <th className="px-4 py-3 text-left text-gray-400 font-semibold">Status</th>
-                        <th className="px-4 py-3 text-left text-gray-400 font-semibold">Date</th>
-                        <th className="px-4 py-3 text-right text-gray-400 font-semibold">Action</th>
+                        <th className="px-3 sm:px-4 py-3 text-left text-gray-400 font-semibold">Order ID</th>
+                        <th className="px-3 sm:px-4 py-3 text-left text-gray-400 font-semibold">Items</th>
+                        <th className="px-3 sm:px-4 py-3 text-left text-gray-400 font-semibold">Total</th>
+                        <th className="px-3 sm:px-4 py-3 text-left text-gray-400 font-semibold">Status</th>
+                        <th className="px-3 sm:px-4 py-3 text-left text-gray-400 font-semibold hidden sm:table-cell">Date</th>
+                        <th className="px-3 sm:px-4 py-3 text-right text-gray-400 font-semibold">Action</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredOrders.length > 0 ? (
-                        filteredOrders.map((order) => (
+                      {orders.slice(0, 5).length > 0 ? (
+                        orders.slice(0, 5).map((order) => (
                           <tr key={order.id} className="border-b border-slate-700 hover:bg-slate-700/50 transition">
-                            <td className="px-4 py-3 font-mono text-white">{order.id.substring(0, 10)}...</td>
-                            <td className="px-4 py-3 text-gray-300">{order.items?.length || 0}</td>
-                            <td className="px-4 py-3 text-green-400 font-semibold">${parseFloat(order.total || 0).toFixed(2)}</td>
-                            <td className="px-4 py-3">{getStatusBadge(order.status)}</td>
-                            <td className="px-4 py-3 text-gray-400 text-xs">
+                            <td className="px-3 sm:px-4 py-3 font-mono text-white text-xs">{order.id.substring(0, 8)}...</td>
+                            <td className="px-3 sm:px-4 py-3 text-gray-300">{order.items?.length || 0}</td>
+                            <td className="px-3 sm:px-4 py-3 text-green-400 font-semibold">${parseFloat(order.total || 0).toFixed(2)}</td>
+                            <td className="px-3 sm:px-4 py-3">{getStatusBadge(order.status)}</td>
+                            <td className="px-3 sm:px-4 py-3 text-gray-400 text-xs hidden sm:table-cell">
                               {new Date(order.createdAt).toLocaleDateString()}
                             </td>
-                            <td className="px-4 py-3 text-right">
+                            <td className="px-3 sm:px-4 py-3 text-right">
                               <button
                                 onClick={() => {
                                   setSelectedOrder(order);
                                   setShowModal(true);
                                 }}
-                                className="text-blue-400 hover:text-blue-300 transition text-xs"
+                                className="text-blue-400 hover:text-blue-300 transition text-xs font-semibold"
                               >
                                 View
                               </button>
@@ -487,25 +486,25 @@ function CustomerDashboardContent() {
             {/* Recommended Products */}
             {recommendedProducts.length > 0 && (
               <div>
-                <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                <h3 className="text-lg sm:text-xl font-bold text-white mb-4 flex items-center gap-2">
                   <Star size={20} className="text-yellow-400" />
                   Recommended For You
                 </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                   {recommendedProducts.slice(0, 3).map((prod) => (
                     <div key={prod.id} className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden hover:border-blue-500 transition group">
                       {prod.image && (
-                        <div className="h-32 overflow-hidden bg-slate-700 relative">
+                        <div className="h-24 sm:h-32 overflow-hidden bg-slate-700 relative">
                           <img src={prod.image} alt={prod.name} className="w-full h-full object-cover group-hover:scale-105 transition" />
                         </div>
                       )}
-                      <div className="p-4 space-y-2">
-                        <h4 className="font-semibold text-white text-sm line-clamp-2">{prod.name}</h4>
+                      <div className="p-3 sm:p-4 space-y-2">
+                        <h4 className="font-semibold text-white text-xs sm:text-sm line-clamp-2">{prod.name}</h4>
                         <div className="flex items-center justify-between">
-                          <p className="text-lg font-bold text-green-400">${parseFloat(prod.price || 0).toFixed(2)}</p>
+                          <p className="text-lg sm:text-xl font-bold text-green-400">${parseFloat(prod.price || 0).toFixed(2)}</p>
                           <button
                             onClick={() => toggleWishlist(prod.id)}
-                            className="text-red-400 hover:text-red-300"
+                            className="text-red-400 hover:text-red-300 flex-shrink-0"
                           >
                             <Heart size={16} fill={wishlist.includes(prod.id) ? 'currentColor' : 'none'} />
                           </button>
@@ -530,33 +529,33 @@ function CustomerDashboardContent() {
           <div className="space-y-4">
             <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full">
+                <table className="w-full text-xs sm:text-sm">
                   <thead>
                     <tr className="border-b border-slate-700 bg-slate-900/50">
-                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Order ID</th>
-                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Items</th>
-                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Total</th>
-                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Status</th>
-                      <th className="px-6 py-3 text-left text-sm font-semibold text-gray-400">Date</th>
-                      <th className="px-6 py-3 text-right text-sm font-semibold text-gray-400">Action</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-gray-400 font-semibold">Order ID</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-gray-400 font-semibold">Items</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-gray-400 font-semibold">Total</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-gray-400 font-semibold">Status</th>
+                      <th className="px-3 sm:px-6 py-3 text-left text-gray-400 font-semibold hidden sm:table-cell">Date</th>
+                      <th className="px-3 sm:px-6 py-3 text-right text-gray-400 font-semibold">Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {orders.length > 0 ? (
                       orders.map((order) => (
                         <tr key={order.id} className="border-b border-slate-700 hover:bg-slate-700/50 transition">
-                          <td className="px-6 py-4 text-sm font-mono text-white">{order.id.substring(0, 12)}...</td>
-                          <td className="px-6 py-4 text-sm text-gray-300">{order.items?.length || 0} items</td>
-                          <td className="px-6 py-4 text-sm font-semibold text-green-400">${parseFloat(order.total || 0).toFixed(2)}</td>
-                          <td className="px-6 py-4">{getStatusBadge(order.status)}</td>
-                          <td className="px-6 py-4 text-sm text-gray-400">{new Date(order.createdAt).toLocaleDateString()}</td>
-                          <td className="px-6 py-4 text-right">
+                          <td className="px-3 sm:px-6 py-3 font-mono text-white text-xs">{order.id.substring(0, 8)}...</td>
+                          <td className="px-3 sm:px-6 py-3 text-gray-300">{order.items?.length || 0}</td>
+                          <td className="px-3 sm:px-6 py-3 font-semibold text-green-400">${parseFloat(order.total || 0).toFixed(2)}</td>
+                          <td className="px-3 sm:px-6 py-3">{getStatusBadge(order.status)}</td>
+                          <td className="px-3 sm:px-6 py-3 text-gray-400 text-xs hidden sm:table-cell">{new Date(order.createdAt).toLocaleDateString()}</td>
+                          <td className="px-3 sm:px-6 py-3 text-right">
                             <button
                               onClick={() => {
                                 setSelectedOrder(order);
                                 setShowModal(true);
                               }}
-                              className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition"
+                              className="px-2 sm:px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition"
                             >
                               View
                             </button>
@@ -565,7 +564,7 @@ function CustomerDashboardContent() {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan="6" className="px-6 py-8 text-center text-gray-400">
+                        <td colSpan="6" className="px-4 py-8 text-center text-gray-400">
                           No orders yet. <Link href="/" className="text-blue-400 hover:underline">Start shopping!</Link>
                         </td>
                       </tr>
@@ -580,27 +579,26 @@ function CustomerDashboardContent() {
         {/* TRACKING TAB */}
         {activeTab === 'tracking' && (
           <div className="space-y-6">
-            <div className="bg-gradient-to-r from-purple-600 to-purple-700 rounded-lg p-6 text-white">
-              <h2 className="text-2xl font-bold mb-2">📦 Track Your Orders</h2>
-              <p className="text-purple-100">View real-time tracking for your confirmed and shipped orders</p>
+            <div className="bg-gradient-to-r from-purple-600 to-purple-700 rounded-xl p-6 text-white">
+              <h2 className="text-2xl sm:text-3xl font-bold mb-2">📦 Track Your Orders</h2>
+              <p className="text-purple-100 text-sm sm:text-base">View real-time tracking for your confirmed and shipped orders</p>
             </div>
 
-            <div className="bg-slate-800 rounded-lg border border-slate-700 p-8 text-center">
+            <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 sm:p-8 text-center">
               <Truck size={48} className="text-purple-400 mx-auto mb-4" />
-              <h3 className="text-xl font-bold text-white mb-2">Order Tracking</h3>
-              <p className="text-gray-400 mb-6">Track your shipments in real-time with detailed status updates and estimated delivery dates.</p>
+              <h3 className="text-xl sm:text-2xl font-bold text-white mb-2">Order Tracking</h3>
+              <p className="text-gray-400 mb-6 text-sm sm:text-base">Track your shipments in real-time with detailed status updates and estimated delivery dates.</p>
               <Link
                 href="/customer/tracking"
-                className="inline-flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg transition"
+                className="inline-flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg transition text-sm sm:text-base"
               >
                 <Truck size={18} />
                 Go to Tracking Page
               </Link>
             </div>
 
-            {/* Quick Stats */}
             {orders.length > 0 && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
                   <p className="text-gray-400 text-sm">Confirmed Orders</p>
                   <p className="text-3xl font-bold text-green-400">
@@ -628,25 +626,25 @@ function CustomerDashboardContent() {
         {activeTab === 'wishlist' && (
           <div>
             {wishlist.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
                 {trendingProducts
                   .filter((p) => wishlist.includes(p.id))
                   .map((prod) => (
                     <div key={prod.id} className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden hover:border-blue-500 transition group">
                       {prod.image && (
-                        <div className="h-40 overflow-hidden bg-slate-700 relative">
+                        <div className="h-24 sm:h-40 overflow-hidden bg-slate-700 relative">
                           <img src={prod.image} alt={prod.name} className="w-full h-full object-cover group-hover:scale-105 transition" />
                         </div>
                       )}
-                      <div className="p-4 space-y-3">
-                        <h4 className="font-semibold text-white line-clamp-2">{prod.name}</h4>
+                      <div className="p-3 sm:p-4 space-y-2">
+                        <h4 className="font-semibold text-white text-xs sm:text-base line-clamp-2">{prod.name}</h4>
                         <div className="flex items-center justify-between">
-                          <p className="text-2xl font-bold text-green-400">${parseFloat(prod.price || 0).toFixed(2)}</p>
+                          <p className="text-lg sm:text-2xl font-bold text-green-400">${parseFloat(prod.price || 0).toFixed(2)}</p>
                           <button
                             onClick={() => toggleWishlist(prod.id)}
-                            className="text-red-400 hover:text-red-300"
+                            className="text-red-400 hover:text-red-300 flex-shrink-0"
                           >
-                            <Heart size={20} fill="currentColor" />
+                            <Heart size={18} fill="currentColor" />
                           </button>
                         </div>
                         <div className="flex gap-2">
@@ -669,9 +667,9 @@ function CustomerDashboardContent() {
               </div>
             ) : (
               <div className="text-center py-12">
-                <Heart size={40} className="text-gray-600 mx-auto mb-4" />
-                <p className="text-gray-400 mb-4">No items in wishlist</p>
-                <Link href="/" className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition">
+                <Heart size={48} className="text-gray-600 mx-auto mb-4" />
+                <p className="text-gray-400 mb-4 text-sm sm:text-base">No items in wishlist</p>
+                <Link href="/" className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition text-sm sm:text-base">
                   Start Shopping
                 </Link>
               </div>
@@ -682,38 +680,38 @@ function CustomerDashboardContent() {
         {/* TRENDING TAB */}
         {activeTab === 'trending' && (
           <div>
-            <h3 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+            <h3 className="text-lg sm:text-xl font-bold text-white mb-6 flex items-center gap-2">
               <TrendingUp size={20} className="text-orange-400" />
               🔥 Trending Now
             </h3>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
               {trendingProducts.map((prod) => (
                 <div key={prod.id} className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden hover:border-blue-500 transition group">
                   {prod.image && (
-                    <div className="h-40 overflow-hidden bg-slate-700 relative">
+                    <div className="h-24 sm:h-40 overflow-hidden bg-slate-700 relative">
                       <img src={prod.image} alt={prod.name} className="w-full h-full object-cover group-hover:scale-105 transition" />
                       <div className="absolute top-2 right-2 bg-blue-600 text-white px-2 py-1 rounded text-xs font-bold">
                         👀 {prod.views || 0}
                       </div>
                     </div>
                   )}
-                  <div className="p-4 space-y-3">
-                    <h4 className="font-semibold text-white line-clamp-2">{prod.name}</h4>
+                  <div className="p-3 sm:p-4 space-y-2">
+                    <h4 className="font-semibold text-white text-xs sm:text-base line-clamp-2">{prod.name}</h4>
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-2xl font-bold text-green-400">${parseFloat(prod.price || 0).toFixed(2)}</p>
+                        <p className="text-lg sm:text-2xl font-bold text-green-400">${parseFloat(prod.price || 0).toFixed(2)}</p>
                         {prod.rating && (
                           <div className="flex items-center gap-1 mt-1">
-                            <Star size={14} className="fill-yellow-400 text-yellow-400" />
+                            <Star size={12} className="fill-yellow-400 text-yellow-400" />
                             <span className="text-xs text-gray-400">{prod.rating}</span>
                           </div>
                         )}
                       </div>
                       <button
                         onClick={() => toggleWishlist(prod.id)}
-                        className="text-red-400 hover:text-red-300 transition"
+                        className="text-red-400 hover:text-red-300 transition flex-shrink-0"
                       >
-                        <Heart size={20} fill={wishlist.includes(prod.id) ? 'currentColor' : 'none'} />
+                        <Heart size={18} fill={wishlist.includes(prod.id) ? 'currentColor' : 'none'} />
                       </button>
                     </div>
                     <div className="flex gap-2">
@@ -738,31 +736,32 @@ function CustomerDashboardContent() {
         )}
       </div>
 
-      {/* Order Details Modal */}
+      {/* ===== ORDER DETAILS MODAL ===== */}
       {showModal && selectedOrder && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
-          <div className="bg-slate-800 rounded-lg max-w-3xl w-full border border-slate-700 p-8 my-8">
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-2xl font-bold text-white">Order Details</h2>
+          <div className="bg-slate-800 rounded-lg max-w-2xl w-full border border-slate-700 p-6 sm:p-8 my-8">
+            {/* Header */}
+            <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-700">
+              <h2 className="text-xl sm:text-2xl font-bold text-white">Order Details</h2>
               <button
                 onClick={() => setShowModal(false)}
-                className="text-gray-400 hover:text-white text-2xl"
+                className="text-gray-400 hover:text-white text-2xl flex-shrink-0"
               >
                 ×
               </button>
             </div>
 
             <div className="space-y-6">
-              {/* Header */}
-              <div className="grid grid-cols-2 gap-4 pb-4 border-b border-slate-700">
+              {/* Info Grid */}
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-gray-400 text-sm">Order ID</p>
-                  <p className="text-white font-mono text-sm">{selectedOrder.id}</p>
+                  <p className="text-white font-mono text-xs sm:text-sm break-all">{selectedOrder.id}</p>
                 </div>
                 <div>
                   <p className="text-gray-400 text-sm">Date</p>
-                  <p className="text-white font-semibold">
-                    {new Date(selectedOrder.createdAt).toLocaleString()}
+                  <p className="text-white font-semibold text-xs sm:text-sm">
+                    {new Date(selectedOrder.createdAt).toLocaleDateString()}
                   </p>
                 </div>
                 <div>
@@ -777,37 +776,38 @@ function CustomerDashboardContent() {
 
               {/* Items */}
               <div>
-                <h3 className="text-lg font-bold text-white mb-3">Items</h3>
+                <h3 className="font-bold text-white mb-3">Items</h3>
                 <div className="space-y-2 bg-slate-700/30 rounded-lg p-4">
                   {selectedOrder.items?.map((item, idx) => (
-                    <div key={idx} className="flex justify-between items-center">
-                      <div>
-                        <p className="text-white font-semibold">{item.productName}</p>
-                        <p className="text-gray-400 text-sm">Qty: {item.quantity} @ ${parseFloat(item.price || 0).toFixed(2)}</p>
+                    <div key={idx} className="flex justify-between items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white font-semibold text-sm">{item.productName}</p>
+                        <p className="text-gray-400 text-xs">Qty: {item.quantity} @ ${parseFloat(item.price || 0).toFixed(2)}</p>
                       </div>
-                      <p className="text-green-400 font-bold">${(parseFloat(item.price || 0) * item.quantity).toFixed(2)}</p>
+                      <p className="text-green-400 font-bold flex-shrink-0">${(parseFloat(item.price || 0) * item.quantity).toFixed(2)}</p>
                     </div>
                   ))}
                 </div>
               </div>
 
-              {/* Continue Payment for Pending */}
+              {/* Continue Payment Button */}
               {String(selectedOrder.status || '').toLowerCase() === 'pending_payment' && (
                 <button
                   onClick={() => {
                     setShowModal(false);
                     handleContinuePayment(selectedOrder);
                   }}
-                  className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition"
+                  className="w-full bg-green-600 hover:bg-green-700 text-white py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition text-sm sm:text-base"
                 >
                   <Zap size={18} />
                   Continue Payment
                 </button>
               )}
 
+              {/* Close Button */}
               <button
                 onClick={() => setShowModal(false)}
-                className="w-full bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-bold transition"
+                className="w-full bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-bold transition text-sm sm:text-base"
               >
                 Close
               </button>
