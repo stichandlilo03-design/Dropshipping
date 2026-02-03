@@ -62,13 +62,12 @@ function LoginContent() {
           localStorage.removeItem('cart');
         }
       } else {
-        // No cart in Firestore - user hasn't added anything or cleared it
+        // No cart in Firestore
         console.log('[Login] No cart found in Firestore');
         localStorage.removeItem('cart');
       }
     } catch (err) {
       console.error('[Login] Error syncing cart from Firestore:', err);
-      // Non-blocking - don't fail login if cart sync fails
     }
     return [];
   };
@@ -142,34 +141,34 @@ function LoginContent() {
         customerData.email = user.email;
       }
 
-      // Initialize/Update customer document in Firestore
+      // Initialize/Update customer document in Firestore with COMPLETE data
       try {
         const dataToSet = {
           id: user.uid,
+          uid: user.uid,
           email: customerData.email || user.email,
-          firstName: customerData.firstName || 'Customer',
-          lastName: customerData.lastName || '',
-          phone: customerData.phone || '',
+          firstName: customerData.firstName && customerData.firstName.trim() ? customerData.firstName : 'Customer',
+          lastName: customerData.lastName && customerData.lastName.trim() ? customerData.lastName : '',
+          phone: customerData.phone && customerData.phone.trim() ? customerData.phone : '',
           updatedAt: new Date().toISOString(),
         };
 
         // Only add createdAt if this is a new document
         if (!customerSnap.exists()) {
           dataToSet.createdAt = new Date().toISOString();
-          dataToSet.wishlist = [];
+          dataToSet.wishlist = customerData.wishlist || [];
         }
 
         await setDoc(customerRef, dataToSet, { merge: true });
-        console.log('[Login] Firestore customer document initialized/updated');
+        console.log('[Login] Firestore customer document saved with:', dataToSet);
         
         // Update customerData with what we just saved
         customerData = dataToSet;
       } catch (firestoreError) {
         console.error('[Login] Firestore error (non-blocking):', firestoreError);
-        // Don't fail login if Firestore update fails - continue anyway
       }
 
-      // Store in localStorage with guaranteed email
+      // Store in localStorage with guaranteed email and firstName
       const customer = {
         id: user.uid,
         email: customerData.email || user.email,
