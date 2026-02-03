@@ -209,11 +209,11 @@ function AdminLoginContent() {
               <ul className="text-gray-400 text-sm space-y-1.5">
                 <li className="flex gap-2">
                   <span className="text-green-400 flex-shrink-0">✓</span>
-                  <span>Only admins (in /users) can login here</span>
+                  <span>Only admins can login here</span>
                 </li>
                 <li className="flex gap-2">
                   <span className="text-green-400 flex-shrink-0">✓</span>
-                  <span>Customers (in /customers) are blocked</span>
+                  <span>Customers are blocked</span>
                 </li>
                 <li className="flex gap-2">
                   <span className="text-green-400 flex-shrink-0">✓</span>
