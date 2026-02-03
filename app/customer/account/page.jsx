@@ -25,6 +25,17 @@ function CustomerDashboardContent() {
   const [addedItem, setAddedItem] = useState(null);
 
   useEffect(() => {
+    // Check if shop tab is requested from URL
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab');
+      if (tabParam === 'shop') {
+        setActiveTab('shop');
+      }
+    }
+  }, []);
+
+  useEffect(() => {
     loadCustomerData();
   }, []);
 
