@@ -203,7 +203,7 @@ function CheckoutContent() {
             <h1 className="text-xl sm:text-2xl font-bold text-white truncate">🛒 Checkout</h1>
             <p className="text-xs sm:text-sm text-gray-400 truncate">{customer.email}</p>
           </div>
-          <Link href="/customer/dashboard" className="p-2 hover:bg-slate-700 rounded-lg transition flex-shrink-0">
+          <Link href="/customer/account" className="p-2 hover:bg-slate-700 rounded-lg transition flex-shrink-0">
             <ArrowLeft size={20} className="text-gray-400" />
           </Link>
         </div>
@@ -233,10 +233,10 @@ function CheckoutContent() {
             <h2 className="text-2xl sm:text-3xl font-bold text-white">Your Cart is Empty</h2>
             <p className="text-gray-400 text-sm sm:text-base">Add some items to get started</p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link href="/customer/dashboard?tab=shop" className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold transition text-sm sm:text-base">
+              <Link href="/customer/account?tab=shop" className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold transition text-sm sm:text-base">
                 Go to Shop
               </Link>
-              <Link href="/customer/dashboard" className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-bold transition text-sm sm:text-base">
+              <Link href="/customer/account" className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-bold transition text-sm sm:text-base">
                 Go to Dashboard
               </Link>
             </div>
@@ -371,7 +371,7 @@ function CheckoutContent() {
                 </button>
 
                 <Link
-                  href="/customer/dashboard?tab=shop"
+                  href="/customer/account?tab=shop"
                   className="w-full mt-3 bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-bold transition text-center block text-sm sm:text-base"
                 >
                   Go to Shop
