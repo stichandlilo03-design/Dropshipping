@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { doc, getDoc, addDoc, collection, getDocs, updateDoc, query, where } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs, updateDoc, query, where, setDoc, deleteDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { ArrowLeft, Star, ShoppingCart, Heart, Copy, Check, Truck, Shield, RefreshCw, Mail, AlertCircle, Loader, X, Plus, Minus, TrendingUp, Eye, Zap, Lock, Trash2, LogOut, User, Menu } from 'lucide-react';
 
@@ -45,8 +45,9 @@ export default function ProductPage() {
     country: 'United States',
   });
 
+  // Check login status and load cart
   useEffect(() => {
-    const checkLoginStatus = () => {
+    const checkLoginStatus = async () => {
       if (typeof window !== 'undefined') {
         try {
           const customerData = localStorage.getItem('customer');
@@ -60,19 +61,27 @@ export default function ProductPage() {
               fullName: `${parsedCustomer.firstName || ''} ${parsedCustomer.lastName || ''}`.trim(),
               phone: parsedCustomer.phone || '',
             }));
+            
+            // Load cart from Firestore if logged in
+            await loadCartFromFirestore(parsedCustomer.id);
           } else {
             setIsLoggedIn(false);
+            // Load cart from localStorage if not logged in
+            loadCartFromLocalStorage();
           }
         } catch (err) {
           console.error('[Product] Error:', err);
           setIsLoggedIn(false);
+          loadCartFromLocalStorage();
         }
       }
+      setCartLoaded(true);
     };
     checkLoginStatus();
   }, []);
 
-  useEffect(() => {
+  // Load cart from localStorage
+  const loadCartFromLocalStorage = () => {
     if (typeof window !== 'undefined') {
       try {
         const savedCart = localStorage.getItem(CART_STORAGE_KEY) || localStorage.getItem('shoppingCart');
@@ -84,24 +93,75 @@ export default function ProductPage() {
         console.error('[Cart] Error:', err);
         setCart([]);
       }
-      setCartLoaded(true);
     }
-  }, []);
+  };
 
+  // Load cart from Firestore
+  const loadCartFromFirestore = async (customerId) => {
+    try {
+      if (!customerId) return;
+      
+      const cartRef = doc(db, 'customers', customerId, 'cart', 'items');
+      const cartSnap = await getDoc(cartRef);
+      
+      if (cartSnap.exists()) {
+        const cartData = cartSnap.data();
+        setCart(cartData.items || []);
+        console.log('[Cart] Loaded from Firestore:', cartData.items);
+      } else {
+        // No Firestore cart, use localStorage
+        loadCartFromLocalStorage();
+      }
+    } catch (err) {
+      console.error('[Cart] Firestore load error:', err);
+      // Fallback to localStorage
+      loadCartFromLocalStorage();
+    }
+  };
+
+  // Save cart - both localStorage and Firestore if logged in
   useEffect(() => {
-    if (typeof window !== 'undefined' && cartLoaded) {
+    if (!cartLoaded) return;
+
+    const saveCart = async () => {
       try {
+        // Always save to localStorage
         if (cart.length > 0) {
           localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(cart));
         } else {
           localStorage.removeItem(CART_STORAGE_KEY);
         }
+
+        // If logged in, also save to Firestore
+        if (isLoggedIn && customer) {
+          const cartDocRef = doc(db, 'customers', customer.id, 'cart', 'items');
+          
+          if (cart.length > 0) {
+            await setDoc(cartDocRef, {
+              items: cart,
+              lastUpdated: new Date().toISOString(),
+              total: cart.reduce((sum, item) => sum + (parseFloat(item.price || 0) * item.quantity), 0),
+              itemCount: cart.length,
+            }, { merge: true });
+            console.log('[Cart] Saved to Firestore');
+          } else {
+            // Delete if empty
+            try {
+              await deleteDoc(cartDocRef);
+            } catch (e) {
+              // Document might not exist
+            }
+          }
+        }
       } catch (err) {
         console.error('[Cart] Save error:', err);
       }
-    }
-  }, [cart, cartLoaded]);
+    };
 
+    saveCart();
+  }, [cart, cartLoaded, isLoggedIn, customer]);
+
+  // Handle click outside cart dropdown
   useEffect(() => {
     const handleClickOutside = (e) => {
       if (cartRef.current && !cartRef.current.contains(e.target)) {
@@ -112,6 +172,7 @@ export default function ProductPage() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
+  // Load product
   useEffect(() => {
     const loadProduct = async () => {
       try {
@@ -432,7 +493,7 @@ export default function ProductPage() {
             </div>
 
             <div className="flex items-center gap-2 sm:gap-4">
-              {/* Cart Button - Responsive */}
+              {/* Cart Button */}
               <div ref={cartRef} className="relative">
                 <button
                   onClick={() => setShowCartDropdown(!showCartDropdown)}
@@ -446,7 +507,7 @@ export default function ProductPage() {
                   )}
                 </button>
 
-                {/* MOBILE CART DROPDOWN - Full Screen */}
+                {/* MOBILE & DESKTOP CART DROPDOWN */}
                 {showCartDropdown && (
                   <div className="fixed sm:absolute left-0 right-0 sm:left-auto sm:right-0 top-20 sm:top-full bottom-0 sm:bottom-auto sm:mt-2 sm:w-96 bg-slate-800 border border-slate-700 rounded-t-2xl sm:rounded-xl shadow-2xl overflow-hidden z-50 flex flex-col">
                     {/* Header */}
@@ -463,10 +524,10 @@ export default function ProductPage() {
                       </button>
                     </div>
 
-                    {/* Items Scrollable Area - Limited Height on Desktop */}
-                    <div className="sm:max-h-64 overflow-y-auto">
+                    {/* Items - Limited Height on Desktop */}
+                    <div className="sm:max-h-64 overflow-y-auto flex-1">
                       {cart.length === 0 ? (
-                        <div className="p-8 text-center flex flex-col items-center justify-center">
+                        <div className="p-8 text-center flex flex-col items-center justify-center h-full">
                           <ShoppingCart size={40} className="text-gray-500 mb-4" />
                           <p className="text-gray-400 text-sm">Cart is empty</p>
                         </div>
@@ -523,8 +584,8 @@ export default function ProductPage() {
 
                     {/* Footer - Always Visible */}
                     {cart.length > 0 && (
-                      <div className="border-t border-slate-700 bg-slate-900 px-4 sm:px-6 py-4 flex-shrink-0">
-                        <div className="space-y-2 mb-4 bg-slate-800 p-3 rounded-lg text-xs sm:text-sm">
+                      <div className="border-t border-slate-700 bg-slate-900 px-4 sm:px-6 py-4 flex-shrink-0 space-y-3">
+                        <div className="space-y-2 bg-slate-800 p-3 rounded-lg text-xs sm:text-sm">
                           <div className="flex justify-between text-gray-400">
                             <span>Subtotal</span>
                             <span>${cartTotal.toFixed(2)}</span>
@@ -543,22 +604,24 @@ export default function ProductPage() {
                           </div>
                         </div>
 
-                        <button
-                          onClick={() => {
-                            setShowCartDropdown(false);
-                            setShowCheckout(true);
-                          }}
-                          className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 sm:py-3 rounded-lg font-bold transition text-sm mb-2"
-                        >
-                          Checkout
-                        </button>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => {
+                              setShowCartDropdown(false);
+                              setShowCheckout(true);
+                            }}
+                            className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 sm:py-3 rounded-lg font-bold transition text-xs sm:text-sm"
+                          >
+                            Checkout
+                          </button>
 
-                        <button
-                          onClick={() => setShowCartDropdown(false)}
-                          className="w-full bg-slate-700 hover:bg-slate-600 text-white py-2 sm:py-3 rounded-lg transition text-sm"
-                        >
-                          Continue Shopping
-                        </button>
+                          <button
+                            onClick={() => setShowCartDropdown(false)}
+                            className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 sm:py-3 rounded-lg transition text-xs sm:text-sm"
+                          >
+                            Continue
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
