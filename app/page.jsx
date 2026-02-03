@@ -15,46 +15,82 @@ export default function LandingPage() {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [userEmail, setUserEmail] = useState(null);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      // ✅ If we're in the middle of logout, ignore this auth state change
+      if (isLoggingOut) {
+        console.log('[Landing] Ignoring auth state change during logout');
+        return;
+      }
+
       if (currentUser) {
         console.log('[Landing] User authenticated:', currentUser.email);
+        console.log('[Landing] UID:', currentUser.uid);
         setUserEmail(currentUser.email);
         
         // ✅ DETERMINE USER TYPE FROM FIRESTORE
         try {
-          // Check if user is a CUSTOMER in 'customers' collection
-          console.log('[Landing] Checking if user is customer...');
+          // CHECK 1: Is user in 'customers' collection?
+          console.log('[Landing] Step 1: Checking if user is in customers collection...');
           const customerRef = doc(db, 'customers', currentUser.uid);
           const customerSnap = await getDoc(customerRef);
 
           if (customerSnap.exists()) {
-            console.log('[Landing] ✅ Customer detected - User has record in customers collection');
+            console.log('[Landing] ✅ CUSTOMER DETECTED - User found in customers/{uid}');
+            console.log('[Landing] Customer data:', customerSnap.data());
+            
+            // ✅ Set customer data
+            localStorage.setItem('customer', JSON.stringify({
+              id: currentUser.uid,
+              email: customerSnap.data().email || currentUser.email,
+              firstName: customerSnap.data().firstName || 'Customer',
+              lastName: customerSnap.data().lastName || '',
+              phone: customerSnap.data().phone || '',
+            }));
+            
+            // Clear admin data
+            localStorage.removeItem('admin');
+            localStorage.removeItem('adminToken');
+            
             setUserType('customer');
             setUser(currentUser);
             setLoading(false);
             return;
           }
 
-          // Check if user is an ADMIN in 'users' collection (NOT 'admins')
-          console.log('[Landing] Checking if user is admin...');
-          const adminRef = doc(db, 'users', currentUser.uid); // ✅ CORRECT COLLECTION
+          // CHECK 2: Is user in 'users' collection? (ADMIN)
+          console.log('[Landing] Step 2: Checking if user is in users collection...');
+          const adminRef = doc(db, 'users', currentUser.uid);
           const adminSnap = await getDoc(adminRef);
 
           if (adminSnap.exists()) {
-            console.log('[Landing] ✅ Admin detected - User has record in users collection');
+            console.log('[Landing] ✅ ADMIN DETECTED - User found in users/{uid}');
+            console.log('[Landing] Admin data:', adminSnap.data());
+            
+            // ✅ Set admin data
+            localStorage.setItem('admin', JSON.stringify({
+              id: currentUser.uid,
+              email: adminSnap.data().email || currentUser.email,
+              name: adminSnap.data().name || 'Admin',
+              role: 'admin',
+            }));
+            
+            // Clear customer data
+            localStorage.removeItem('customer');
+            localStorage.removeItem('customerToken');
+            localStorage.removeItem('cart');
+            localStorage.removeItem('wishlist');
+            
             setUserType('admin');
             setUser(currentUser);
             setLoading(false);
             return;
           }
 
-          // User exists in Firebase but not in either collection
-          console.log('[Landing] ❌ User authenticated but no role found in any collection');
-          console.log('[Landing] Checked:');
-          console.log('  - customers/{uid}: Not found');
-          console.log('  - users/{uid}: Not found');
+          // User authenticated in Firebase but not in either collection
+          console.log('[Landing] ❌ No role found - User authenticated but not in customers or users collection');
           setUserType(null);
           setUser(null);
         } catch (error) {
@@ -63,7 +99,7 @@ export default function LandingPage() {
           setUser(null);
         }
       } else {
-        console.log('[Landing] No user authenticated');
+        console.log('[Landing] ✅ No user authenticated (logged out)');
         setUserType(null);
         setUser(null);
         setUserEmail(null);
@@ -72,16 +108,19 @@ export default function LandingPage() {
     });
 
     return () => unsubscribe();
-  }, []);
+  }, [isLoggingOut]);
 
   const handleLogout = async () => {
     try {
-      console.log('[Landing] Logging out user:', userEmail);
+      console.log('[Landing] ===== LOGOUT STARTED =====');
+      console.log('[Landing] Current user:', userEmail);
+      console.log('[Landing] Current role:', userType);
       
-      // Sign out from Firebase
-      await signOut(auth);
+      // ✅ Set flag to ignore auth state changes
+      setIsLoggingOut(true);
       
-      // ✅ Clear ALL local storage related to both customer and admin
+      // Step 1: Clear localStorage BEFORE signing out
+      console.log('[Landing] Step 1: Clearing all localStorage...');
       localStorage.removeItem('customer');
       localStorage.removeItem('customerToken');
       localStorage.removeItem('admin');
@@ -89,15 +128,25 @@ export default function LandingPage() {
       localStorage.removeItem('cart');
       localStorage.removeItem('wishlist');
       localStorage.removeItem('notifications');
+      console.log('[Landing] ✅ localStorage cleared');
       
-      console.log('[Landing] ✅ Logout complete, all data cleared');
+      // Step 2: Sign out from Firebase
+      console.log('[Landing] Step 2: Signing out from Firebase...');
+      await signOut(auth);
+      console.log('[Landing] ✅ Firebase signOut complete');
       
-      // Reset state
+      // Step 3: Reset state
+      console.log('[Landing] Step 3: Resetting state...');
       setUserType(null);
       setUser(null);
       setUserEmail(null);
+      setIsLoggingOut(false);
+      console.log('[Landing] ✅ State reset');
+      
+      console.log('[Landing] ===== LOGOUT COMPLETE =====');
     } catch (error) {
       console.error('[Landing] Logout error:', error);
+      setIsLoggingOut(false);
     }
   };
 
@@ -134,9 +183,10 @@ export default function LandingPage() {
           <button
             onClick={handleLogout}
             className="w-full bg-slate-700 hover:bg-slate-600 text-gray-300 py-2 rounded-lg transition flex items-center justify-center gap-2"
+            disabled={isLoggingOut}
           >
             <LogOut size={16} />
-            Logout
+            {isLoggingOut ? 'Logging out...' : 'Logout'}
           </button>
         </div>
       </div>
@@ -165,9 +215,10 @@ export default function LandingPage() {
           <button
             onClick={handleLogout}
             className="w-full bg-slate-700 hover:bg-slate-600 text-gray-300 py-2 rounded-lg transition flex items-center justify-center gap-2"
+            disabled={isLoggingOut}
           >
             <LogOut size={16} />
-            Logout
+            {isLoggingOut ? 'Logging out...' : 'Logout'}
           </button>
         </div>
       </div>
