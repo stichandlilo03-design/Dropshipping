@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, ShoppingCart, Trash2, Plus, Minus, AlertCircle, Check } from 'lucide-react';
 import { loadStripe } from '@stripe/stripe-js';
+import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 function CheckoutContent() {
   const router = useRouter();
@@ -18,38 +20,111 @@ function CheckoutContent() {
   const SHIPPING_COST = 10.0;
   const TAX_RATE = 0.08;
 
+  // Load cart from Firestore
+  const loadCartFromFirestore = async (customerId) => {
+    try {
+      if (!customerId) return;
+      
+      const cartRef = doc(db, 'customers', customerId, 'cart', 'items');
+      const cartSnap = await getDoc(cartRef);
+      
+      if (cartSnap.exists()) {
+        const cartData = cartSnap.data();
+        const items = cartData.items || [];
+        if (items.length > 0) {
+          setCart(items);
+          localStorage.setItem('cart', JSON.stringify(items));
+          console.log('[Checkout] Cart loaded from Firestore:', items);
+        } else {
+          setCart([]);
+          localStorage.removeItem('cart');
+        }
+      } else {
+        setCart([]);
+        localStorage.removeItem('cart');
+      }
+    } catch (err) {
+      console.error('[Checkout] Error loading cart from Firestore:', err);
+      // Fallback to localStorage
+      loadCartFromLocalStorage();
+    }
+  };
+
+  // Load cart from localStorage
+  const loadCartFromLocalStorage = () => {
+    try {
+      const cartData = localStorage.getItem('cart');
+      if (cartData) {
+        const parsedCart = JSON.parse(cartData);
+        setCart(Array.isArray(parsedCart) ? parsedCart : []);
+      }
+    } catch (e) {
+      console.error('[Checkout] Error parsing cart:', e);
+      setCart([]);
+    }
+  };
+
   useEffect(() => {
     const customerData = localStorage.getItem('customer');
-    const cartData = localStorage.getItem('cart');
 
     if (!customerData) {
       router.push('/customer/login');
       return;
     }
 
-    setCustomer(JSON.parse(customerData));
+    const parsedCustomer = JSON.parse(customerData);
+    setCustomer(parsedCustomer);
     
-    if (cartData) {
-      try {
-        const parsedCart = JSON.parse(cartData);
-        setCart(Array.isArray(parsedCart) ? parsedCart : []);
-      } catch (e) {
-        console.error('Error parsing cart:', e);
-        setCart([]);
-      }
+    // Load cart from Firestore if logged in, fallback to localStorage
+    if (parsedCustomer.id) {
+      loadCartFromFirestore(parsedCustomer.id);
+    } else {
+      loadCartFromLocalStorage();
     }
     
     setLoading(false);
   }, [router]);
 
-  // Save cart to localStorage whenever it changes
+  // Save cart to both localStorage and Firestore
   useEffect(() => {
-    if (cart.length > 0) {
-      localStorage.setItem('cart', JSON.stringify(cart));
-    } else {
-      localStorage.removeItem('cart');
-    }
-  }, [cart]);
+    if (!customer) return;
+
+    const saveCart = async () => {
+      try {
+        // Save to localStorage
+        if (cart.length > 0) {
+          localStorage.setItem('cart', JSON.stringify(cart));
+        } else {
+          localStorage.removeItem('cart');
+        }
+
+        // Save to Firestore
+        const cartDocRef = doc(db, 'customers', customer.id, 'cart', 'items');
+        
+        if (cart.length > 0) {
+          await setDoc(cartDocRef, {
+            items: cart,
+            lastUpdated: new Date().toISOString(),
+            total: cart.reduce((sum, item) => sum + (parseFloat(item.price || 0) * item.quantity), 0),
+            itemCount: cart.length,
+          }, { merge: true });
+          console.log('[Checkout] Cart saved to Firestore');
+        } else {
+          // DELETE from Firestore when cart is cleared
+          try {
+            await deleteDoc(cartDocRef);
+            console.log('[Checkout] Cart deleted from Firestore (cart cleared)');
+          } catch (e) {
+            console.log('[Checkout] Cart already deleted or does not exist');
+          }
+        }
+      } catch (err) {
+        console.error('[Checkout] Error saving cart:', err);
+      }
+    };
+
+    saveCart();
+  }, [cart, customer]);
 
   // Calculate amounts
   const calculateAmounts = () => {
@@ -163,7 +238,7 @@ function CheckoutContent() {
         setLoading(false);
       }
     } catch (err) {
-      console.error('Checkout error:', err);
+      console.error('[Checkout] Error:', err);
       setError(err.message || 'Checkout failed. Please try again.');
       setLoading(false);
     }
