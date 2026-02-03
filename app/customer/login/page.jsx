@@ -41,6 +41,29 @@ function LoginContent() {
     setPageLoading(false);
   }, [isCheckout, urlEmail, router]);
 
+  // Function to sync cart from Firestore
+  const syncCartFromFirestore = async (userId) => {
+    try {
+      const cartDocRef = doc(db, 'customers', userId, 'cart', 'items');
+      const cartSnap = await getDoc(cartDocRef);
+
+      if (cartSnap.exists()) {
+        const cartData = cartSnap.data();
+        const items = cartData.items || [];
+
+        if (items.length > 0) {
+          console.log('[Login] Cart synced from Firestore:', items);
+          localStorage.setItem('cart', JSON.stringify(items));
+          return items;
+        }
+      }
+    } catch (err) {
+      console.error('[Login] Error syncing cart from Firestore:', err);
+      // Non-blocking - don't fail login if cart sync fails
+    }
+    return [];
+  };
+
   const handleLogin = async (e) => {
     e.preventDefault();
     
@@ -128,6 +151,10 @@ function LoginContent() {
       localStorage.setItem('customerToken', token);
 
       console.log('[Login] Customer saved to localStorage');
+
+      // Sync cart from Firestore
+      console.log('[Login] Syncing cart from Firestore...');
+      await syncCartFromFirestore(user.uid);
 
       setLoading(false);
 
