@@ -7,7 +7,7 @@ import { collection, getDocs, deleteDoc, doc, addDoc, updateDoc, query, where, w
 import { db } from '@/lib/firebase';
 import { auth } from '@/lib/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { Search, Plus, Trash2, Eye, ArrowLeft, Package, Copy, Edit, Check, AlertCircle, QrCode, Save, X, Share2, Download, Upload, BarChart3, Star, TrendingUp, Heart, ShoppingCart, DollarSign, Zap } from 'lucide-react';
+import { Search, Plus, Trash2, Eye, ArrowLeft, Package, Copy, Edit, Check, AlertCircle, QrCode, Save, X, Share2, Download, Upload, BarChart3, Star, TrendingUp, Heart, ShoppingCart, DollarSign, Zap, Loader } from 'lucide-react';
 
 export default function ProductsPage() {
   const router = useRouter();
@@ -22,13 +22,17 @@ export default function ProductsPage() {
   const [showModal, setShowModal] = useState(false);
   const [showDetails, setShowDetails] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showPublishModal, setShowPublishModal] = useState(false);
   const [formData, setFormData] = useState({});
   const [loading, setLoading] = useState(true);
+  const [publishLoading, setPublishLoading] = useState(false);
+  const [publishResults, setPublishResults] = useState(null);
   const [copiedUrl, setCopiedUrl] = useState(null);
   const [notification, setNotification] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
   const [selectedProducts, setSelectedProducts] = useState(new Set());
   const [showBulkActions, setShowBulkActions] = useState(false);
+  const [selectedPlatforms, setSelectedPlatforms] = useState(new Set());
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
@@ -78,7 +82,6 @@ export default function ProductsPage() {
   const applyFiltersAndSort = (products) => {
     let result = [...products];
 
-    // Search filter
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       result = result.filter(p =>
@@ -89,7 +92,6 @@ export default function ProductsPage() {
       );
     }
 
-    // Source filter
     if (filterSource !== 'all') {
       if (filterSource === 'manual') {
         result = result.filter(p => !p.trendingSource && !p.supplier);
@@ -102,7 +104,6 @@ export default function ProductsPage() {
       }
     }
 
-    // Status filter
     if (filterStatus !== 'all') {
       if (filterStatus === 'sale') {
         result = result.filter(p => p.onSale);
@@ -113,7 +114,6 @@ export default function ProductsPage() {
       }
     }
 
-    // Sort
     if (sortBy === 'newest') {
       result.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
     } else if (sortBy === 'price-low') {
@@ -141,6 +141,47 @@ export default function ProductsPage() {
   const showNotification = (message, type = 'success') => {
     setNotification({ message, type });
     setTimeout(() => setNotification(null), 3000);
+  };
+
+  const handlePublish = async (product) => {
+    if (selectedPlatforms.size === 0) {
+      showNotification('Select at least one platform', 'error');
+      return;
+    }
+
+    setPublishLoading(true);
+    console.log('[Products] Publishing to platforms:', Array.from(selectedPlatforms));
+
+    try {
+      const response = await fetch('/api/social/publish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          productId: product.id,
+          productName: product.name,
+          productDescription: product.description || '',
+          productPrice: product.price,
+          imageUrl: product.image,
+          platforms: Array.from(selectedPlatforms),
+        }),
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        console.log('[Products] Published:', result);
+        setPublishResults(result.results);
+        showNotification(`✅ Published to ${result.stats.successful} platform(s)!`, 'success');
+      } else {
+        console.error('[Products] Error:', result.error);
+        showNotification(`❌ Error: ${result.error}`, 'error');
+      }
+    } catch (error) {
+      console.error('[Products] Error:', error);
+      showNotification('Error publishing to social media', 'error');
+    } finally {
+      setPublishLoading(false);
+    }
   };
 
   const deleteProduct = async (id) => {
@@ -372,7 +413,7 @@ export default function ProductsPage() {
             </a>
             <div>
               <h1 className="text-4xl font-bold text-white">📦 Products Hub</h1>
-              <p className="text-gray-300">Create, manage, and analyze your product inventory</p>
+              <p className="text-gray-300">Manage products & publish to social media</p>
             </div>
           </div>
           <button
@@ -401,7 +442,7 @@ export default function ProductsPage() {
           </div>
         )}
 
-        {/* Advanced Stats Grid */}
+        {/* Stats Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-8">
           <div className="bg-slate-800 border border-slate-700 rounded-lg p-3">
             <p className="text-gray-400 text-xs">📦 Total</p>
@@ -476,7 +517,6 @@ export default function ProductsPage() {
         {/* Search, Filter & Sort */}
         <div className="mb-6 space-y-4 bg-slate-800/50 p-6 rounded-lg border border-slate-700">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            {/* Search */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">🔍 Search</label>
               <div className="relative">
@@ -491,7 +531,6 @@ export default function ProductsPage() {
               </div>
             </div>
 
-            {/* Source Filter */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">📊 Source</label>
               <select
@@ -507,7 +546,6 @@ export default function ProductsPage() {
               </select>
             </div>
 
-            {/* Status Filter */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">🏷️ Status</label>
               <select
@@ -522,7 +560,6 @@ export default function ProductsPage() {
               </select>
             </div>
 
-            {/* Sort */}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">↕️ Sort By</label>
               <select
@@ -622,6 +659,19 @@ export default function ProductsPage() {
                   <button
                     onClick={() => {
                       setSelectedProduct(product);
+                      setShowPublishModal(true);
+                      setSelectedPlatforms(new Set());
+                      setPublishResults(null);
+                    }}
+                    className="flex-1 bg-purple-600 hover:bg-purple-700 text-white py-2 rounded text-sm transition flex items-center justify-center gap-1"
+                    title="Publish to social media"
+                  >
+                    <Share2 size={16} />
+                    Publish
+                  </button>
+                  <button
+                    onClick={() => {
+                      setSelectedProduct(product);
                       setShowDetails(true);
                     }}
                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded text-sm transition flex items-center justify-center gap-1"
@@ -659,6 +709,109 @@ export default function ProductsPage() {
               <Plus size={20} />
               Create Your First Product
             </button>
+          </div>
+        )}
+
+        {/* Publish Modal - NEW */}
+        {showPublishModal && selectedProduct && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+            <div className="bg-slate-800 rounded-lg p-6 max-w-md w-full border border-slate-700 my-auto">
+              <h2 className="text-2xl font-bold text-white mb-4 flex items-center gap-2">
+                <Share2 size={24} />
+                Publish Product
+              </h2>
+
+              {!publishResults ? (
+                <>
+                  <p className="text-gray-300 mb-4">Select platforms to publish "{selectedProduct.name}"</p>
+
+                  {/* Platform Selection */}
+                  <div className="space-y-3 mb-6">
+                    {[
+                      { id: 'tiktok', name: 'TikTok Shop', icon: '🎵' },
+                      { id: 'instagram', name: 'Instagram', icon: '📷' },
+                      { id: 'facebook', name: 'Facebook', icon: '👥' },
+                      { id: 'pinterest', name: 'Pinterest', icon: '📌' },
+                    ].map(platform => (
+                      <label key={platform.id} className="flex items-center gap-3 p-3 bg-slate-700 rounded-lg cursor-pointer hover:bg-slate-600 transition">
+                        <input
+                          type="checkbox"
+                          checked={selectedPlatforms.has(platform.id)}
+                          onChange={() => {
+                            const newSelected = new Set(selectedPlatforms);
+                            if (newSelected.has(platform.id)) {
+                              newSelected.delete(platform.id);
+                            } else {
+                              newSelected.add(platform.id);
+                            }
+                            setSelectedPlatforms(newSelected);
+                          }}
+                          className="w-5 h-5 rounded"
+                        />
+                        <span className="text-2xl">{platform.icon}</span>
+                        <span className="text-white font-medium">{platform.name}</span>
+                      </label>
+                    ))}
+                  </div>
+
+                  {/* Buttons */}
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowPublishModal(false)}
+                      className="flex-1 bg-gray-600 hover:bg-gray-700 text-white py-2 rounded transition"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => handlePublish(selectedProduct)}
+                      disabled={publishLoading || selectedPlatforms.size === 0}
+                      className="flex-1 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white py-2 rounded transition flex items-center justify-center gap-2 font-bold"
+                    >
+                      {publishLoading ? (
+                        <>
+                          <Loader size={16} className="animate-spin" />
+                          Publishing...
+                        </>
+                      ) : (
+                        <>
+                          <Share2 size={16} />
+                          Publish ({selectedPlatforms.size})
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-3 mb-6">
+                    {publishResults.map((result, idx) => (
+                      <div key={idx} className={`p-3 rounded-lg border ${
+                        result.success 
+                          ? 'bg-green-900/30 border-green-500 text-green-300'
+                          : 'bg-red-900/30 border-red-500 text-red-300'
+                      }`}>
+                        <p className="font-semibold flex items-center gap-2">
+                          {result.success ? <Check size={16} /> : <AlertCircle size={16} />}
+                          {result.platform}
+                        </p>
+                        <p className="text-xs mt-1">
+                          {result.success ? '✅ Published successfully!' : `❌ ${result.error}`}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => setShowPublishModal(false)}
+                      className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded transition font-bold"
+                    >
+                      Done
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         )}
 
@@ -851,7 +1004,7 @@ export default function ProductsPage() {
           </div>
         )}
 
-        {/* Details Modal - WITH ALL LINKS & QR CODE */}
+        {/* Details Modal */}
         {showDetails && selectedProduct && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
             <div className="bg-slate-800 rounded-lg p-6 max-w-2xl w-full border border-slate-700 my-8">
@@ -866,14 +1019,12 @@ export default function ProductsPage() {
               </div>
 
               <div className="space-y-6 max-h-[calc(100vh-200px)] overflow-y-auto">
-                {/* Product Image */}
                 {selectedProduct.image && (
                   <div className="rounded-lg overflow-hidden">
                     <img src={selectedProduct.image} alt={selectedProduct.name} className="w-full h-64 object-cover" />
                   </div>
                 )}
 
-                {/* Product Info */}
                 <div className="space-y-4 pb-6 border-b border-slate-700">
                   <div>
                     <p className="text-sm text-gray-400">Product Name</p>
@@ -905,7 +1056,6 @@ export default function ProductsPage() {
                   </div>
                 </div>
 
-                {/* Analytics */}
                 <div className="space-y-4 pb-6 border-b border-slate-700">
                   <h3 className="text-lg font-bold text-white">📈 Analytics</h3>
                   <div className="grid grid-cols-4 gap-3">
@@ -928,11 +1078,9 @@ export default function ProductsPage() {
                   </div>
                 </div>
 
-                {/* Links Section */}
                 <div className="space-y-4 pb-6 border-b border-slate-700">
                   <h3 className="text-lg font-bold text-white">🔗 Product Links</h3>
 
-                  {/* Direct Link */}
                   <div className="bg-slate-700/50 rounded-lg p-4">
                     <p className="text-sm text-gray-400 mb-2">Direct Product Link</p>
                     <div className="flex items-center gap-2">
@@ -951,45 +1099,6 @@ export default function ProductsPage() {
                     </div>
                   </div>
 
-                  {/* Facebook Link */}
-                  <div className="bg-slate-700/50 rounded-lg p-4">
-                    <p className="text-sm text-gray-400 mb-2">📱 Facebook Ads (UTM)</p>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={`${generateProductUrl(selectedProduct)}?utm_source=facebook&utm_medium=ads`}
-                        readOnly
-                        className="flex-1 bg-slate-600 text-blue-400 text-xs px-3 py-2 rounded font-mono"
-                      />
-                      <button
-                        onClick={() => handleCopyUrl(`${generateProductUrl(selectedProduct)}?utm_source=facebook&utm_medium=ads`)}
-                        className="text-gray-400 hover:text-white transition p-2"
-                      >
-                        <Copy size={20} />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* TikTok Link */}
-                  <div className="bg-slate-700/50 rounded-lg p-4">
-                    <p className="text-sm text-gray-400 mb-2">🎵 TikTok Bio Link</p>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="text"
-                        value={`${generateProductUrl(selectedProduct)}?utm_source=tiktok`}
-                        readOnly
-                        className="flex-1 bg-slate-600 text-blue-400 text-xs px-3 py-2 rounded font-mono"
-                      />
-                      <button
-                        onClick={() => handleCopyUrl(`${generateProductUrl(selectedProduct)}?utm_source=tiktok`)}
-                        className="text-gray-400 hover:text-white transition p-2"
-                      >
-                        <Copy size={20} />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* QR Code */}
                   <div className="bg-slate-700/50 rounded-lg p-4 flex items-center gap-4">
                     <div>
                       <p className="text-sm text-gray-400 flex items-center gap-1 mb-1">
@@ -1007,7 +1116,6 @@ export default function ProductsPage() {
                 </div>
               </div>
 
-              {/* Action Buttons */}
               <div className="flex gap-3 pt-6 border-t border-slate-700">
                 <button
                   onClick={() => setShowDetails(false)}
