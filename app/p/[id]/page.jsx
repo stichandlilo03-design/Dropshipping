@@ -132,11 +132,12 @@ export default function ProductPage() {
           localStorage.removeItem(CART_STORAGE_KEY);
         }
 
-        // If logged in, also save to Firestore
+        // If logged in, also save/delete from Firestore
         if (isLoggedIn && customer) {
           const cartDocRef = doc(db, 'customers', customer.id, 'cart', 'items');
           
           if (cart.length > 0) {
+            // Save to Firestore
             await setDoc(cartDocRef, {
               items: cart,
               lastUpdated: new Date().toISOString(),
@@ -145,11 +146,13 @@ export default function ProductPage() {
             }, { merge: true });
             console.log('[Cart] Saved to Firestore');
           } else {
-            // Delete if empty
+            // DELETE from Firestore when cart is cleared
             try {
               await deleteDoc(cartDocRef);
+              console.log('[Cart] Deleted from Firestore (cart cleared by user)');
             } catch (e) {
-              // Document might not exist
+              // Document might not exist, which is fine
+              console.log('[Cart] Cart already deleted or does not exist');
             }
           }
         }
