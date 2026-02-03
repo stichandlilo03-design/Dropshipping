@@ -49,7 +49,35 @@ function CustomerDashboardContent() {
         return;
       }
 
-      const parsedCustomer = JSON.parse(customerData);
+      let parsedCustomer = JSON.parse(customerData);
+
+      // Load fresh customer data from Firestore to ensure we have all details
+      try {
+        const customerRef = doc(db, 'customers', parsedCustomer.id);
+        const customerSnap = await getDoc(customerRef);
+
+        if (customerSnap.exists()) {
+          const firestoreData = customerSnap.data();
+          console.log('[Dashboard] Customer data from Firestore:', firestoreData);
+
+          // Merge Firestore data with localStorage (Firestore takes priority)
+          parsedCustomer = {
+            id: parsedCustomer.id,
+            email: firestoreData.email || parsedCustomer.email || '',
+            firstName: firestoreData.firstName || parsedCustomer.firstName || 'Customer',
+            lastName: firestoreData.lastName || parsedCustomer.lastName || '',
+            phone: firestoreData.phone || parsedCustomer.phone || '',
+          };
+
+          // Update localStorage with fresh data
+          localStorage.setItem('customer', JSON.stringify(parsedCustomer));
+          console.log('[Dashboard] Customer data updated from Firestore:', parsedCustomer);
+        }
+      } catch (err) {
+        console.error('[Dashboard] Error loading from Firestore, using localStorage:', err);
+        // Continue with localStorage data
+      }
+
       setCustomer(parsedCustomer);
 
       await loadWishlistFromFirestore(parsedCustomer.id);
@@ -534,7 +562,7 @@ function CustomerDashboardContent() {
           <div className="space-y-6">
             <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-6 text-white">
               <h2 className="text-2xl sm:text-3xl font-bold mb-2">{customer.firstName} {customer.lastName}</h2>
-              <p className="text-blue-100 text-sm sm:text-base">{customer.email}</p>
+              <p className="text-blue-100 text-sm sm:text-base">{customer.email || 'No email'}</p>
               <p className="text-blue-100 text-xs sm:text-sm mt-2">{customer.phone || 'No phone'}</p>
             </div>
 
