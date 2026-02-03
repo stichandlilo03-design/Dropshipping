@@ -463,10 +463,10 @@ export default function ProductPage() {
                       </button>
                     </div>
 
-                    {/* Items Scrollable Area */}
-                    <div className="flex-1 overflow-y-auto">
+                    {/* Items Scrollable Area - Limited Height on Desktop */}
+                    <div className="sm:max-h-64 overflow-y-auto">
                       {cart.length === 0 ? (
-                        <div className="p-8 text-center flex flex-col items-center justify-center h-full">
+                        <div className="p-8 text-center flex flex-col items-center justify-center">
                           <ShoppingCart size={40} className="text-gray-500 mb-4" />
                           <p className="text-gray-400 text-sm">Cart is empty</p>
                         </div>
