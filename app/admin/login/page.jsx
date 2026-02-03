@@ -4,7 +4,8 @@ import { Suspense, useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase';
+import { doc, getDoc } from 'firebase/firestore';
 import { Loader, AlertCircle, Eye, EyeOff, ArrowRight, Zap } from 'lucide-react';
 
 function AdminLoginContent() {
@@ -27,21 +28,56 @@ function AdminLoginContent() {
         return;
       }
 
-      console.log('[Admin Login] Attempting login:', email);
+      console.log('[Admin Login] Attempting login with email:', email);
 
+      // Sign in with Firebase
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      console.log('[Admin Login] Success:', user.uid);
+      console.log('[Admin Login] Firebase auth successful, UID:', user.uid);
+
+      // CRITICAL: Check if user exists in /users collection (ADMIN ONLY)
+      console.log('[Admin Login] Checking if user exists in /users (admin) collection...');
+      
+      const adminRef = doc(db, 'users', user.uid);
+      const adminSnap = await getDoc(adminRef);
+
+      if (!adminSnap.exists()) {
+        console.error('[Admin Login] User NOT found in /users collection - user is a customer!');
+        
+        setError(
+          '🚫 ACCESS DENIED!\n\n' +
+          'This email is registered as a CUSTOMER, not an ADMIN.\n\n' +
+          'Customers must use the customer login.\n\n' +
+          'If you need admin access, contact the administrator.'
+        );
+        setLoading(false);
+        return;
+      }
+
+      const adminData = adminSnap.data();
+      console.log('[Admin Login] User found in /users collection:', adminData);
+
+      // User is in /users = ADMIN ✅
+      console.log('[Admin Login] User verified as ADMIN - access granted!');
 
       // Get auth token
       const token = await user.getIdToken();
 
-      // Store token (admin doesn't use customer data in localStorage)
+      // Store admin data
       localStorage.setItem('adminToken', token);
-      localStorage.removeItem('customer'); // Make sure customer data is cleared
+      localStorage.setItem('admin', JSON.stringify({
+        id: user.uid,
+        email: user.email,
+        name: adminData.name || 'Admin',
+        role: 'admin',
+      }));
 
-      console.log('[Admin Login] Redirecting to dashboard');
+      // Make sure customer data is cleared
+      localStorage.removeItem('customer');
+      localStorage.removeItem('customerToken');
+
+      console.log('[Admin Login] Admin logged in successfully, redirecting to dashboard');
 
       // Redirect to admin dashboard
       router.push('/admin/dashboard');
@@ -49,13 +85,13 @@ function AdminLoginContent() {
       console.error('[Admin Login] Error:', err);
 
       if (err.code === 'auth/user-not-found') {
-        setError('Admin account not found. Please check your email.');
+        setError('❌ This email is not registered as an admin.\n\nPlease check your email or contact the administrator.');
       } else if (err.code === 'auth/wrong-password') {
-        setError('Incorrect password. Please try again.');
+        setError('❌ Incorrect password.\n\nPlease try again.');
       } else if (err.code === 'auth/invalid-email') {
-        setError('Invalid email format.');
+        setError('❌ Invalid email format.');
       } else if (err.code === 'auth/user-disabled') {
-        setError('This admin account has been disabled.');
+        setError('⛔ This admin account has been disabled.');
       } else {
         setError(err.message || 'Login failed. Please try again.');
       }
@@ -76,14 +112,22 @@ function AdminLoginContent() {
               </div>
             </div>
             <h1 className="text-3xl sm:text-4xl font-bold text-white mb-2">Admin Login</h1>
-            <p className="text-gray-400">Access your DropBoard dashboard</p>
+            <p className="text-gray-400">🔐 Authorized Admins Only</p>
+          </div>
+
+          {/* Security Info */}
+          <div className="bg-blue-900/30 border border-blue-500/30 rounded-lg p-4">
+            <p className="text-blue-200 text-sm">
+              <strong>ℹ️ Admin Access Only:</strong> Only users registered in the admin database can login here. 
+              Customers must use the customer login page.
+            </p>
           </div>
 
           {/* Error Message */}
           {error && (
             <div className="bg-red-900/30 border border-red-500 text-red-200 p-4 rounded-lg flex gap-3">
               <AlertCircle size={20} className="flex-shrink-0 mt-0.5" />
-              <p className="text-sm">{error}</p>
+              <p className="text-sm whitespace-pre-line">{error}</p>
             </div>
           )}
 
@@ -130,7 +174,7 @@ function AdminLoginContent() {
               {loading ? (
                 <>
                   <Loader size={18} className="animate-spin" />
-                  Logging in...
+                  Verifying Admin Status...
                 </>
               ) : (
                 <>
@@ -140,6 +184,16 @@ function AdminLoginContent() {
               )}
             </button>
           </form>
+
+          {/* Info Box */}
+          <div className="bg-slate-700/50 rounded-lg p-4 space-y-2">
+            <p className="text-gray-300 text-sm font-semibold">🔐 How This Works:</p>
+            <ul className="text-gray-400 text-sm space-y-1">
+              <li>✓ Only admins (in /users) can login here</li>
+              <li>✓ Customers (in /customers) are blocked</li>
+              <li>✓ Completely separate databases</li>
+            </ul>
+          </div>
 
           {/* Divider */}
           <div className="relative">
@@ -151,6 +205,14 @@ function AdminLoginContent() {
             </div>
           </div>
 
+          {/* Customer Link */}
+          <Link
+            href="/customer/login"
+            className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold text-center transition"
+          >
+            Customer Login
+          </Link>
+
           {/* Back to Home */}
           <Link
             href="/"
@@ -160,12 +222,12 @@ function AdminLoginContent() {
           </Link>
 
           {/* Footer */}
-          <div className="text-center text-xs text-gray-400">
-            <p>🔐 Admin access only</p>
-            <p className="mt-2">
-              Looking for customer login?{' '}
+          <div className="text-center text-xs text-gray-400 space-y-2">
+            <p>🔒 This page is restricted to registered admins only</p>
+            <p>
+              Are you a customer?{' '}
               <Link href="/customer/login" className="text-blue-400 hover:text-blue-300 transition">
-                Click here
+                Use customer login
               </Link>
             </p>
           </div>
