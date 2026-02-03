@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { LogOut, ShoppingCart, Package, Clock, CheckCircle, XCircle, Eye, Zap, Heart, Star, TrendingUp, Bell, Settings, Home, BarChart3, Gift, Truck, Menu, X } from 'lucide-react';
+import { LogOut, ShoppingCart, Package, Clock, CheckCircle, XCircle, Eye, Zap, Heart, Star, TrendingUp, Bell, Settings, Home, BarChart3, Gift, Truck, Menu, X, Check, Store } from 'lucide-react';
 import { collection, getDocs, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
@@ -11,15 +11,18 @@ function CustomerDashboardContent() {
   const router = useRouter();
   const [customer, setCustomer] = useState(null);
   const [orders, setOrders] = useState([]);
+  const [products, setProducts] = useState([]);
   const [trendingProducts, setTrendingProducts] = useState([]);
   const [recommendedProducts, setRecommendedProducts] = useState([]);
   const [wishlist, setWishlist] = useState([]);
+  const [cart, setCart] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
   const [loading, setLoading] = useState(true);
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [showModal, setShowModal] = useState(false);
   const [unreadNotifications, setUnreadNotifications] = useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [addedItem, setAddedItem] = useState(null);
 
   useEffect(() => {
     loadCustomerData();
@@ -51,7 +54,18 @@ function CustomerDashboardContent() {
         }
       }
 
+      const cartData = localStorage.getItem('cart');
+      if (cartData) {
+        try {
+          const parsedCart = JSON.parse(cartData);
+          setCart(Array.isArray(parsedCart) ? parsedCart : []);
+        } catch (err) {
+          console.error('Error parsing cart:', err);
+        }
+      }
+
       await loadCustomerOrders(parsedCustomer.id, parsedCustomer.email);
+      await loadAllProducts();
       await loadTrendingProducts();
       await loadRecommendedProducts();
 
@@ -74,11 +88,7 @@ function CustomerDashboardContent() {
         setWishlist([]);
       }
     } catch (error) {
-      console.error('[Wishlist] Error loading from Firestore:', error);
-      const savedWishlist = localStorage.getItem('wishlist');
-      if (savedWishlist) {
-        setWishlist(JSON.parse(savedWishlist));
-      }
+      console.error('[Wishlist] Error:', error);
     }
   };
 
@@ -107,21 +117,40 @@ function CustomerDashboardContent() {
     }
   };
 
-  const loadTrendingProducts = async () => {
+  const loadAllProducts = async () => {
     try {
       const productsRef = collection(db, 'products');
       const allProducts = await getDocs(productsRef);
 
-      let products = [];
+      let loadedProducts = [];
       allProducts.forEach((doc) => {
-        products.push({
+        loadedProducts.push({
           id: doc.id,
           ...doc.data(),
         });
       });
 
-      products.sort((a, b) => (b.views || 0) - (a.views || 0));
-      setTrendingProducts(products.slice(0, 6));
+      setProducts(loadedProducts);
+    } catch (error) {
+      console.error('[Products] Error:', error);
+    }
+  };
+
+  const loadTrendingProducts = async () => {
+    try {
+      const productsRef = collection(db, 'products');
+      const allProducts = await getDocs(productsRef);
+
+      let prods = [];
+      allProducts.forEach((doc) => {
+        prods.push({
+          id: doc.id,
+          ...doc.data(),
+        });
+      });
+
+      prods.sort((a, b) => (b.views || 0) - (a.views || 0));
+      setTrendingProducts(prods.slice(0, 6));
     } catch (error) {
       console.error('[Trending] Error:', error);
     }
@@ -132,16 +161,16 @@ function CustomerDashboardContent() {
       const productsRef = collection(db, 'products');
       const allProducts = await getDocs(productsRef);
 
-      let products = [];
+      let prods = [];
       allProducts.forEach((doc) => {
-        products.push({
+        prods.push({
           id: doc.id,
           ...doc.data(),
         });
       });
 
-      products.sort((a, b) => (b.rating || 0) - (a.rating || 0));
-      setRecommendedProducts(products.slice(0, 6));
+      prods.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+      setRecommendedProducts(prods.slice(0, 6));
     } catch (error) {
       console.error('[Recommended] Error:', error);
     }
@@ -173,8 +202,41 @@ function CustomerDashboardContent() {
 
       localStorage.setItem('wishlist', JSON.stringify(updated));
     } catch (error) {
-      console.error('[Wishlist] Error updating:', error);
+      console.error('[Wishlist] Error:', error);
     }
+  };
+
+  const addToCart = (product) => {
+    const existingItem = cart.find(item => item.id === product.id);
+
+    let updatedCart;
+    if (existingItem) {
+      updatedCart = cart.map(item =>
+        item.id === product.id
+          ? { ...item, quantity: (item.quantity || 1) + 1 }
+          : item
+      );
+    } else {
+      updatedCart = [
+        ...cart,
+        {
+          id: String(product.id),
+          productId: String(product.productId || product.id),
+          name: String(product.name || product.productName || 'Product'),
+          productName: String(product.name || product.productName || 'Product'),
+          price: parseFloat(product.price),
+          quantity: 1,
+          image: product.image ? String(product.image) : '',
+          description: product.description ? String(product.description) : '',
+        },
+      ];
+    }
+
+    localStorage.setItem('cart', JSON.stringify(updatedCart));
+    setCart(updatedCart);
+
+    setAddedItem(product.id);
+    setTimeout(() => setAddedItem(null), 2000);
   };
 
   const handleContinuePayment = (order) => {
@@ -259,14 +321,14 @@ function CustomerDashboardContent() {
     .filter((o) => String(o.status || '').toLowerCase() === 'paid')
     .reduce((sum, o) => sum + parseFloat(o.total || 0), 0);
 
+  const cartCount = cart.reduce((sum, item) => sum + (item.quantity || 1), 0);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800">
-      {/* ===== TOP HEADER ===== */}
+      {/* HEADER */}
       <div className="sticky top-0 z-40 bg-slate-800/50 border-b border-slate-700 backdrop-blur">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
-          {/* Header Top Row */}
           <div className="flex items-center justify-between mb-4">
-            {/* Left: Home & Title */}
             <div className="flex items-center gap-3 min-w-0">
               <Link href="/" className="p-2 hover:bg-slate-700 rounded-lg transition flex-shrink-0">
                 <Home size={20} className="text-gray-400" />
@@ -277,12 +339,10 @@ function CustomerDashboardContent() {
               </div>
             </div>
 
-            {/* Right: Icons (Desktop) */}
             <div className="hidden sm:flex items-center gap-1">
               <Link
                 href="/customer/notifications"
                 className="p-2 hover:bg-slate-700 rounded-lg transition relative group"
-                title="Notifications"
               >
                 <Bell size={20} className="text-gray-400 group-hover:text-yellow-400" />
                 {unreadNotifications > 0 && (
@@ -292,11 +352,7 @@ function CustomerDashboardContent() {
                 )}
               </Link>
 
-              <Link
-                href="/customer/settings"
-                className="p-2 hover:bg-slate-700 rounded-lg transition"
-                title="Settings"
-              >
+              <Link href="/customer/settings" className="p-2 hover:bg-slate-700 rounded-lg transition">
                 <Settings size={20} className="text-gray-400 hover:text-blue-400" />
               </Link>
 
@@ -305,7 +361,6 @@ function CustomerDashboardContent() {
               </button>
             </div>
 
-            {/* Mobile Menu Button */}
             <button
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
               className="sm:hidden p-2 hover:bg-slate-700 rounded-lg transition"
@@ -314,13 +369,9 @@ function CustomerDashboardContent() {
             </button>
           </div>
 
-          {/* Mobile Menu */}
           {mobileMenuOpen && (
             <div className="sm:hidden mb-4 pb-4 border-t border-slate-700 pt-4 space-y-2">
-              <Link
-                href="/customer/notifications"
-                className="flex items-center gap-2 p-2 hover:bg-slate-700 rounded-lg transition text-gray-300"
-              >
+              <Link href="/customer/notifications" className="flex items-center gap-2 p-2 hover:bg-slate-700 rounded-lg transition text-gray-300">
                 <Bell size={18} />
                 <span className="flex-1">Notifications</span>
                 {unreadNotifications > 0 && (
@@ -330,10 +381,7 @@ function CustomerDashboardContent() {
                 )}
               </Link>
 
-              <Link
-                href="/customer/settings"
-                className="flex items-center gap-2 p-2 hover:bg-slate-700 rounded-lg transition text-gray-300"
-              >
+              <Link href="/customer/settings" className="flex items-center gap-2 p-2 hover:bg-slate-700 rounded-lg transition text-gray-300">
                 <Settings size={18} />
                 <span>Settings</span>
               </Link>
@@ -351,11 +399,12 @@ function CustomerDashboardContent() {
             </div>
           )}
 
-          {/* Navigation Tabs */}
+          {/* TABS */}
           <div className="flex gap-2 overflow-x-auto pb-2 sm:pb-0 -mx-4 sm:mx-0 px-4 sm:px-0">
             {[
               { id: 'overview', icon: BarChart3, label: 'Overview' },
-              { id: 'orders', icon: ShoppingCart, label: `Orders (${orders.length})` },
+              { id: 'shop', icon: Store, label: `Shop (${products.length})` },
+              { id: 'orders', icon: Package, label: `Orders (${orders.length})` },
               { id: 'tracking', icon: Truck, label: 'Tracking' },
               { id: 'wishlist', icon: Heart, label: `Wishlist (${wishlist.length})` },
               { id: 'trending', icon: TrendingUp, label: 'Trending' },
@@ -380,19 +429,104 @@ function CustomerDashboardContent() {
         </div>
       </div>
 
-      {/* ===== MAIN CONTENT ===== */}
+      {/* CONTENT */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        {/* SHOP TAB */}
+        {activeTab === 'shop' && (
+          <div className="space-y-6">
+            <div className="bg-gradient-to-r from-orange-600 to-orange-700 rounded-xl p-6 text-white">
+              <h2 className="text-2xl sm:text-3xl font-bold mb-2 flex items-center gap-2">
+                <Store size={28} />
+                Shop Products
+              </h2>
+              <p className="text-orange-100 text-sm sm:text-base">Browse admin uploaded products</p>
+            </div>
+
+            {products.length === 0 ? (
+              <div className="text-center py-12">
+                <Store size={48} className="text-gray-600 mx-auto mb-4" />
+                <p className="text-gray-400">No products available yet</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
+                {products.map((product) => (
+                  <div key={product.id} className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden hover:border-blue-500 transition group">
+                    {product.image && (
+                      <div className="h-32 sm:h-40 overflow-hidden bg-slate-700 relative">
+                        <img src={product.image} alt={product.name} className="w-full h-full object-cover group-hover:scale-105 transition" />
+                        <button
+                          onClick={() => toggleWishlist(product.id)}
+                          className="absolute top-2 right-2 p-2 bg-slate-900/80 hover:bg-slate-900 rounded-lg transition"
+                        >
+                          <Heart size={16} className={wishlist.includes(product.id) ? 'fill-red-500 text-red-500' : 'text-gray-400'} />
+                        </button>
+                      </div>
+                    )}
+                    <div className="p-2 sm:p-4 space-y-2">
+                      <div>
+                        <h3 className="text-white font-bold line-clamp-2 text-xs sm:text-sm">{product.name || product.productName}</h3>
+                        <p className="text-gray-400 text-xs">{product.category || 'Product'}</p>
+                      </div>
+
+                      {product.description && (
+                        <p className="text-gray-400 text-xs line-clamp-2">{product.description}</p>
+                      )}
+
+                      <div className="flex items-center justify-between pt-2 border-t border-slate-700">
+                        <span className="text-green-400 font-bold text-sm sm:text-base">${parseFloat(product.price).toFixed(2)}</span>
+                        {product.rating && (
+                          <div className="flex items-center gap-0.5">
+                            <Star size={12} className="fill-yellow-400 text-yellow-400" />
+                            <span className="text-xs text-gray-400">{product.rating}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex gap-2">
+                        <Link
+                          href={`/p/${product.id}`}
+                          className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-2 rounded text-xs font-semibold text-center transition"
+                        >
+                          View
+                        </Link>
+                        <button
+                          onClick={() => addToCart(product)}
+                          className={`flex-1 py-2 rounded text-xs font-semibold transition flex items-center justify-center gap-1 ${
+                            addedItem === product.id
+                              ? 'bg-green-600 text-white'
+                              : 'bg-blue-600 hover:bg-blue-700 text-white'
+                          }`}
+                        >
+                          {addedItem === product.id ? (
+                            <>
+                              <Check size={12} />
+                              <span className="hidden sm:inline">Added</span>
+                            </>
+                          ) : (
+                            <>
+                              <ShoppingCart size={12} />
+                              <span className="hidden sm:inline">Add</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* OVERVIEW TAB */}
         {activeTab === 'overview' && (
           <div className="space-y-6">
-            {/* Profile Card */}
             <div className="bg-gradient-to-r from-blue-600 to-blue-700 rounded-xl p-6 text-white">
               <h2 className="text-2xl sm:text-3xl font-bold mb-2">{customer.firstName} {customer.lastName}</h2>
               <p className="text-blue-100 text-sm sm:text-base">{customer.email}</p>
-              <p className="text-blue-100 text-xs sm:text-sm mt-2">{customer.phone || 'No phone number'}</p>
+              <p className="text-blue-100 text-xs sm:text-sm mt-2">{customer.phone || 'No phone'}</p>
             </div>
 
-            {/* Stats Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
               <div className="bg-slate-800 rounded-lg border border-slate-700 p-4 sm:p-6">
                 <div className="flex items-center justify-between mb-2">
@@ -429,10 +563,7 @@ function CustomerDashboardContent() {
 
             {/* Recent Orders */}
             <div>
-              <h3 className="text-lg sm:text-xl font-bold text-white mb-4 flex items-center gap-2">
-                <Clock size={20} />
-                Recent Orders
-              </h3>
+              <h3 className="text-lg sm:text-xl font-bold text-white mb-4">Recent Orders</h3>
               <div className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-xs sm:text-sm">
@@ -483,13 +614,10 @@ function CustomerDashboardContent() {
               </div>
             </div>
 
-            {/* Recommended Products */}
+            {/* Recommended */}
             {recommendedProducts.length > 0 && (
               <div>
-                <h3 className="text-lg sm:text-xl font-bold text-white mb-4 flex items-center gap-2">
-                  <Star size={20} className="text-yellow-400" />
-                  Recommended For You
-                </h3>
+                <h3 className="text-lg sm:text-xl font-bold text-white mb-4">Recommended</h3>
                 <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                   {recommendedProducts.slice(0, 3).map((prod) => (
                     <div key={prod.id} className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden hover:border-blue-500 transition group">
@@ -506,14 +634,14 @@ function CustomerDashboardContent() {
                             onClick={() => toggleWishlist(prod.id)}
                             className="text-red-400 hover:text-red-300 flex-shrink-0"
                           >
-                            <Heart size={16} fill={wishlist.includes(prod.id) ? 'currentColor' : 'none'} />
+                            <Heart size={14} fill={wishlist.includes(prod.id) ? 'currentColor' : 'none'} />
                           </button>
                         </div>
                         <Link
                           href={`/p/${prod.id}`}
                           className="block w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded text-xs font-semibold text-center transition"
                         >
-                          View Product
+                          View
                         </Link>
                       </div>
                     </div>
@@ -565,7 +693,7 @@ function CustomerDashboardContent() {
                     ) : (
                       <tr>
                         <td colSpan="6" className="px-4 py-8 text-center text-gray-400">
-                          No orders yet. <Link href="/" className="text-blue-400 hover:underline">Start shopping!</Link>
+                          No orders. <Link href="/" className="text-blue-400 hover:underline">Start shopping!</Link>
                         </td>
                       </tr>
                     )}
@@ -580,45 +708,22 @@ function CustomerDashboardContent() {
         {activeTab === 'tracking' && (
           <div className="space-y-6">
             <div className="bg-gradient-to-r from-purple-600 to-purple-700 rounded-xl p-6 text-white">
-              <h2 className="text-2xl sm:text-3xl font-bold mb-2">📦 Track Your Orders</h2>
-              <p className="text-purple-100 text-sm sm:text-base">View real-time tracking for your confirmed and shipped orders</p>
+              <h2 className="text-2xl sm:text-3xl font-bold mb-2">📦 Track Orders</h2>
+              <p className="text-purple-100 text-sm sm:text-base">Real-time tracking</p>
             </div>
 
             <div className="bg-slate-800 rounded-lg border border-slate-700 p-6 sm:p-8 text-center">
               <Truck size={48} className="text-purple-400 mx-auto mb-4" />
               <h3 className="text-xl sm:text-2xl font-bold text-white mb-2">Order Tracking</h3>
-              <p className="text-gray-400 mb-6 text-sm sm:text-base">Track your shipments in real-time with detailed status updates and estimated delivery dates.</p>
+              <p className="text-gray-400 mb-6 text-sm sm:text-base">Track shipments in real-time</p>
               <Link
                 href="/customer/tracking"
                 className="inline-flex items-center gap-2 px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg transition text-sm sm:text-base"
               >
                 <Truck size={18} />
-                Go to Tracking Page
+                Go to Tracking
               </Link>
             </div>
-
-            {orders.length > 0 && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
-                  <p className="text-gray-400 text-sm">Confirmed Orders</p>
-                  <p className="text-3xl font-bold text-green-400">
-                    {orders.filter((o) => ['paid', 'confirmed', 'processing', 'shipped', 'completed'].includes(String(o.status || '').toLowerCase())).length}
-                  </p>
-                </div>
-                <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
-                  <p className="text-gray-400 text-sm">Shipped Orders</p>
-                  <p className="text-3xl font-bold text-purple-400">
-                    {orders.filter((o) => String(o.status || '').toLowerCase() === 'shipped').length}
-                  </p>
-                </div>
-                <div className="bg-slate-800 rounded-lg border border-slate-700 p-6">
-                  <p className="text-gray-400 text-sm">Delivered Orders</p>
-                  <p className="text-3xl font-bold text-blue-400">
-                    {orders.filter((o) => String(o.status || '').toLowerCase() === 'completed').length}
-                  </p>
-                </div>
-              </div>
-            )}
           </div>
         )}
 
@@ -668,10 +773,13 @@ function CustomerDashboardContent() {
             ) : (
               <div className="text-center py-12">
                 <Heart size={48} className="text-gray-600 mx-auto mb-4" />
-                <p className="text-gray-400 mb-4 text-sm sm:text-base">No items in wishlist</p>
-                <Link href="/" className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition text-sm sm:text-base">
-                  Start Shopping
-                </Link>
+                <p className="text-gray-400 mb-4 text-sm sm:text-base">No items</p>
+                <button
+                  onClick={() => setActiveTab('shop')}
+                  className="inline-block bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition"
+                >
+                  Go to Shop
+                </button>
               </div>
             )}
           </div>
@@ -680,10 +788,7 @@ function CustomerDashboardContent() {
         {/* TRENDING TAB */}
         {activeTab === 'trending' && (
           <div>
-            <h3 className="text-lg sm:text-xl font-bold text-white mb-6 flex items-center gap-2">
-              <TrendingUp size={20} className="text-orange-400" />
-              🔥 Trending Now
-            </h3>
+            <h3 className="text-lg sm:text-xl font-bold text-white mb-6">🔥 Trending</h3>
             <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
               {trendingProducts.map((prod) => (
                 <div key={prod.id} className="bg-slate-800 rounded-lg border border-slate-700 overflow-hidden hover:border-blue-500 transition group">
@@ -736,11 +841,10 @@ function CustomerDashboardContent() {
         )}
       </div>
 
-      {/* ===== ORDER DETAILS MODAL ===== */}
+      {/* ORDER MODAL */}
       {showModal && selectedOrder && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
           <div className="bg-slate-800 rounded-lg max-w-2xl w-full border border-slate-700 p-6 sm:p-8 my-8">
-            {/* Header */}
             <div className="flex justify-between items-center mb-6 pb-4 border-b border-slate-700">
               <h2 className="text-xl sm:text-2xl font-bold text-white">Order Details</h2>
               <button
@@ -752,7 +856,6 @@ function CustomerDashboardContent() {
             </div>
 
             <div className="space-y-6">
-              {/* Info Grid */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-gray-400 text-sm">Order ID</p>
@@ -774,7 +877,6 @@ function CustomerDashboardContent() {
                 </div>
               </div>
 
-              {/* Items */}
               <div>
                 <h3 className="font-bold text-white mb-3">Items</h3>
                 <div className="space-y-2 bg-slate-700/30 rounded-lg p-4">
@@ -790,7 +892,6 @@ function CustomerDashboardContent() {
                 </div>
               </div>
 
-              {/* Continue Payment Button */}
               {String(selectedOrder.status || '').toLowerCase() === 'pending_payment' && (
                 <button
                   onClick={() => {
@@ -804,7 +905,6 @@ function CustomerDashboardContent() {
                 </button>
               )}
 
-              {/* Close Button */}
               <button
                 onClick={() => setShowModal(false)}
                 className="w-full bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-bold transition text-sm sm:text-base"
@@ -814,6 +914,19 @@ function CustomerDashboardContent() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Floating Cart */}
+      {cartCount > 0 && (
+        <Link
+          href="/checkout"
+          className="fixed bottom-6 right-6 bg-blue-600 hover:bg-blue-700 text-white p-4 rounded-full shadow-lg flex items-center justify-center transition relative"
+        >
+          <ShoppingCart size={24} />
+          <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+            {cartCount}
+          </span>
+        </Link>
       )}
     </div>
   );
