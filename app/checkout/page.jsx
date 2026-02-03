@@ -233,11 +233,11 @@ function CheckoutContent() {
             <h2 className="text-2xl sm:text-3xl font-bold text-white">Your Cart is Empty</h2>
             <p className="text-gray-400 text-sm sm:text-base">Add some items to get started</p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link href="/customer/dashboard" className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold transition text-sm sm:text-base">
-                Go to Dashboard
+              <Link href="/customer/dashboard?tab=shop" className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-bold transition text-sm sm:text-base">
+                Go to Shop
               </Link>
-              <Link href="/" className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-bold transition text-sm sm:text-base">
-                Continue Shopping
+              <Link href="/customer/dashboard" className="flex-1 bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-bold transition text-sm sm:text-base">
+                Go to Dashboard
               </Link>
             </div>
           </div>
@@ -371,10 +371,10 @@ function CheckoutContent() {
                 </button>
 
                 <Link
-                  href="/customer/dashboard"
+                  href="/customer/dashboard?tab=shop"
                   className="w-full mt-3 bg-slate-700 hover:bg-slate-600 text-white py-3 rounded-lg font-bold transition text-center block text-sm sm:text-base"
                 >
-                  Continue Shopping
+                  Go to Shop
                 </Link>
 
                 {/* Trust Badge */}
