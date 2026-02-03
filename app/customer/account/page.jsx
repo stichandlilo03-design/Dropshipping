@@ -24,9 +24,9 @@ function CustomerDashboardContent() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [addedItem, setAddedItem] = useState(null);
 
-  // ✅ TRACK IF CART WAS LOADED
-  const cartLoadedRef = useRef(false);
-  const initialCartRef = useRef(null);
+  // ✅ PROPER REFS - Track if cart was loaded AND if user modified it
+  const cartInitializedRef = useRef(false);  // Did we load cart from storage?
+  const cartModifiedRef = useRef(false);     // Did USER modify it?
 
   useEffect(() => {
     // Check if shop tab is requested from URL
@@ -108,23 +108,27 @@ function CustomerDashboardContent() {
         }
       }
 
-      // ✅ LOAD CART FROM localStorage (NOT Firestore on dashboard)
+      // ✅ LOAD CART FROM localStorage ONLY
       const cartData = localStorage.getItem('cart');
       if (cartData) {
         try {
           const parsedCart = JSON.parse(cartData);
-          setCart(Array.isArray(parsedCart) ? parsedCart : []);
-          initialCartRef.current = parsedCart; // ✅ Store initial cart
-          cartLoadedRef.current = true; // ✅ Mark as loaded
-          console.log('[Dashboard] Cart loaded from localStorage:', parsedCart);
+          if (Array.isArray(parsedCart) && parsedCart.length > 0) {
+            setCart(parsedCart);
+            console.log('[Dashboard] Cart loaded from localStorage:', parsedCart);
+          } else {
+            setCart([]);
+          }
         } catch (err) {
           console.error('Error parsing cart:', err);
-          cartLoadedRef.current = true; // ✅ Mark as loaded even if error
         }
       } else {
-        cartLoadedRef.current = true; // ✅ Mark as loaded (even if empty)
+        setCart([]);
         console.log('[Dashboard] No cart in localStorage');
       }
+
+      // ✅ Mark cart as initialized (loaded)
+      cartInitializedRef.current = true;
 
       await loadCustomerOrders(parsedCustomer.id, parsedCustomer.email);
       await loadAllProducts();
@@ -138,21 +142,13 @@ function CustomerDashboardContent() {
     }
   };
 
-  // ✅ ONLY SAVE CART IF IT ACTUALLY CHANGED (not on initial load)
+  // ✅ ONLY SAVE CART IF USER EXPLICITLY MODIFIED IT
   useEffect(() => {
     if (!customer || !customer.id) return;
-    if (!cartLoadedRef.current) return; // ✅ Don't save until cart is loaded
+    if (!cartInitializedRef.current) return; // ✅ Cart not loaded yet - don't save
+    if (!cartModifiedRef.current) return;   // ✅ User didn't modify - don't save
 
-    // ✅ Only save if cart actually changed from initial state
-    const cartString = JSON.stringify(cart);
-    const initialString = JSON.stringify(initialCartRef.current || []);
-
-    if (cartString === initialString) {
-      console.log('[Dashboard] Cart unchanged, not saving');
-      return; // ✅ Don't save if same as initial
-    }
-
-    console.log('[Dashboard] Cart changed, saving to localStorage and Firestore');
+    console.log('[Dashboard] User modified cart, saving...');
 
     const saveCartAsync = async () => {
       try {
@@ -193,6 +189,7 @@ function CustomerDashboardContent() {
     };
 
     saveCartAsync();
+    cartModifiedRef.current = false; // ✅ Reset after save
   }, [cart, customer]);
 
   const loadWishlistFromFirestore = async (customerId) => {
@@ -351,11 +348,35 @@ function CustomerDashboardContent() {
       ];
     }
 
-    // This triggers the useEffect that saves to localStorage and Firestore
+    // Update cart state
     setCart(updatedCart);
+    
+    // ✅ Mark as modified by user
+    cartInitializedRef.current = true;
+    cartModifiedRef.current = true;
+    console.log('[Dashboard] User added item to cart, will save');
 
     setAddedItem(product.id);
     setTimeout(() => setAddedItem(null), 2000);
+  };
+
+  const removeFromCart = (itemId) => {
+    const updatedCart = cart.filter(item => item.id !== itemId);
+    setCart(updatedCart);
+    
+    // ✅ Mark as modified by user
+    cartModifiedRef.current = true;
+    console.log('[Dashboard] User removed item from cart, will save');
+  };
+
+  const clearCart = () => {
+    if (confirm('Are you sure you want to clear your entire cart?')) {
+      setCart([]);
+      
+      // ✅ Mark as modified by user
+      cartModifiedRef.current = true;
+      console.log('[Dashboard] User cleared cart, will delete');
+    }
   };
 
   const handleContinuePayment = (order) => {
