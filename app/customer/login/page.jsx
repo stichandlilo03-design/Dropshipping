@@ -5,7 +5,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Mail, Lock, Eye, EyeOff, LogIn, AlertCircle } from 'lucide-react';
 import { signInWithEmailAndPassword } from 'firebase/auth';
-import { auth } from '@/lib/firebase';
+import { auth, db } from '@/lib/firebase';
+import { doc, setDoc, getDoc } from 'firebase/firestore';
 
 function LoginContent() {
   const router = useRouter();
@@ -70,7 +71,7 @@ function LoginContent() {
         method: 'GET',
         headers: {
           'Authorization': `Bearer ${token}`,
-          'X-User-ID': user.uid, // Send user ID
+          'X-User-ID': user.uid,
           'Content-Type': 'application/json',
         },
       });
@@ -86,6 +87,33 @@ function LoginContent() {
       const customerData = await response.json();
 
       console.log('[Login] Customer data fetched:', customerData);
+
+      // Initialize/Update customer document in Firestore with wishlist field
+      try {
+        const customerRef = doc(db, 'customers', user.uid);
+        const customerSnap = await getDoc(customerRef);
+
+        const dataToSet = {
+          id: user.uid,
+          email: user.email,
+          firstName: customerData.firstName || 'Customer',
+          lastName: customerData.lastName || '',
+          phone: customerData.phone || '',
+          updatedAt: new Date().toISOString(),
+        };
+
+        // Only add createdAt if this is a new document
+        if (!customerSnap.exists()) {
+          dataToSet.createdAt = new Date().toISOString();
+          dataToSet.wishlist = [];
+        }
+
+        await setDoc(customerRef, dataToSet, { merge: true });
+        console.log('[Login] Firestore customer document initialized/updated');
+      } catch (firestoreError) {
+        console.error('[Login] Firestore error (non-blocking):', firestoreError);
+        // Don't fail login if Firestore update fails - continue anyway
+      }
 
       // Store in localStorage
       const customer = {
