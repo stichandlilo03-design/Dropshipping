@@ -430,7 +430,7 @@ function CustomerDashboardContent() {
       </div>
 
       {/* CONTENT */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-24 sm:pb-8">
         {/* SHOP TAB */}
         {activeTab === 'shop' && (
           <div className="space-y-6">
@@ -916,35 +916,32 @@ function CustomerDashboardContent() {
         </div>
       )}
 
-      {/* Floating Cart - Responsive */}
+      {/* CART BUTTON - PROPERLY RESPONSIVE */}
       {cartCount > 0 && (
-        <>
-          {/* MOBILE VERSION - Full width at bottom */}
-          <div className="sm:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-900 border-t border-slate-700">
-            <Link
-              href="/checkout"
-              className="w-full flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-4 transition relative"
-            >
-              <ShoppingCart size={20} />
-              <span>View Cart</span>
-              <span className="absolute right-4 top-2 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">
-                {cartCount}
-              </span>
-            </Link>
-          </div>
-
-          {/* DESKTOP VERSION - Floating in corner */}
-          <Link
-            href="/checkout"
-            className="hidden sm:flex fixed bottom-6 right-6 z-40 items-center justify-center gap-3 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-full shadow-lg transition relative"
-          >
-            <ShoppingCart size={24} />
-            <span className="font-semibold">Cart</span>
-            <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full">
+        <Link
+          href="/checkout"
+          className="fixed bottom-0 sm:bottom-6 left-0 sm:left-auto right-0 sm:right-6 z-50 w-full sm:w-auto"
+        >
+          {/* MOBILE VERSION */}
+          <div className="sm:hidden bg-blue-600 hover:bg-blue-700 text-white p-4 flex items-center justify-between border-t border-blue-500">
+            <div className="flex items-center gap-3">
+              <ShoppingCart size={24} />
+              <span className="font-bold text-lg">View Cart</span>
+            </div>
+            <span className="bg-red-500 text-white px-3 py-1 rounded-full font-bold text-sm">
               {cartCount}
             </span>
-          </Link>
-        </>
+          </div>
+
+          {/* DESKTOP VERSION */}
+          <div className="hidden sm:flex fixed bottom-6 right-6 bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-full shadow-2xl items-center gap-3 border border-blue-500">
+            <ShoppingCart size={24} />
+            <span className="font-bold">Cart ({cartCount})</span>
+            <span className="bg-red-500 text-white px-2 py-1 rounded-full font-bold text-xs">
+              {cartCount}
+            </span>
+          </div>
+        </Link>
       )}
     </div>
   );
