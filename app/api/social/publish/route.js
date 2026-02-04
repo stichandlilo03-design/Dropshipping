@@ -1,8 +1,8 @@
 // app/api/social/publish/route.js
-// CORRECTED - Real Pinterest API Integration with proper response handling
+// FIXED - Read Pinterest credentials from Firestore
 
 import { NextResponse } from 'next/server';
-import { doc, updateDoc, arrayUnion, increment, collection, addDoc } from 'firebase/firestore';
+import { doc, updateDoc, arrayUnion, increment, collection, addDoc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export async function POST(request) {
@@ -15,12 +15,13 @@ export async function POST(request) {
       productPrice,
       imageUrl,
       platforms,
+      userId,
     } = body;
 
     console.log('[Social API] ===== SOCIAL PUBLISH STARTED =====');
     console.log('[Social API] Product:', productName);
     console.log('[Social API] Platforms:', platforms);
-    console.log('[Social API] Image:', imageUrl ? 'Yes' : 'No');
+    console.log('[Social API] User ID:', userId);
 
     if (!productId || !platforms || platforms.length === 0) {
       return NextResponse.json(
@@ -29,13 +30,40 @@ export async function POST(request) {
       );
     }
 
-    // ✅ Get integration credentials from environment
-    console.log('[Social API] Loading integration credentials...');
-    const pinterestToken = process.env.PINTEREST_ACCESS_TOKEN;
-    const boardId = process.env.PINTEREST_BOARD_ID;
+    // ✅ GET PINTEREST CREDENTIALS FROM FIRESTORE
+    console.log('[Social API] Loading Pinterest credentials from Firestore...');
+    let pinterestToken = null;
+    let boardId = null;
 
-    console.log('[Social API] Pinterest Token exists:', !!pinterestToken);
-    console.log('[Social API] Board ID:', boardId);
+    try {
+      // Get user's integrations
+      const integrationsRef = doc(db, 'user_integrations', userId);
+      const integrationsSnap = await getDoc(integrationsRef);
+
+      if (integrationsSnap.exists()) {
+        const integrations = integrationsSnap.data();
+        console.log('[Social API] Integrations found:', Object.keys(integrations));
+
+        // Get Pinterest integration
+        if (integrations.pinterest) {
+          const pinterestData = integrations.pinterest;
+          console.log('[Social API] Pinterest data:', {
+            status: pinterestData.status,
+            hasToken: !!pinterestData.credentials?.accessToken,
+            hasBoardId: !!pinterestData.credentials?.boardId,
+          });
+
+          pinterestToken = pinterestData.credentials?.accessToken;
+          boardId = pinterestData.credentials?.boardId;
+        } else {
+          console.warn('[Social API] Pinterest integration not found in Firestore');
+        }
+      } else {
+        console.warn('[Social API] No integrations document found for user:', userId);
+      }
+    } catch (err) {
+      console.error('[Social API] Error loading from Firestore:', err);
+    }
 
     const results = [];
     let successCount = 0;
@@ -124,25 +152,6 @@ export async function POST(request) {
       }
     } catch (updateError) {
       console.error('[Social API] Product update error (non-blocking):', updateError);
-    }
-
-    // ✅ Log analytics
-    console.log('[Social API] Logging analytics...');
-    try {
-      const analyticsData = {
-        productId,
-        productName,
-        timestamp: new Date().toISOString(),
-        platforms: platforms,
-        successful: successCount,
-        failed: platforms.length - successCount,
-        results: results.map(r => ({ platform: r?.platform || 'Unknown', success: r?.success || false })),
-      };
-
-      await addDoc(collection(db, 'analytics', 'social_publishes'), analyticsData);
-      console.log('[Social API] ✅ Analytics logged');
-    } catch (analyticsError) {
-      console.error('[Social API] Analytics error (non-blocking):', analyticsError);
     }
 
     console.log('[Social API] ===== SOCIAL PUBLISH COMPLETE =====');
