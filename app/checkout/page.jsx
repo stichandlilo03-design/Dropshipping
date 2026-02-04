@@ -15,7 +15,8 @@ function CheckoutContent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showEmptyCart, setShowEmptyCart] = useState(false);
-  const cartLoadedRef = useRef(false); // ✅ Track if we've loaded cart
+  const cartLoadedRef = useRef(false);
+  const previousCartLength = useRef(0); // ✅ TRACK PREVIOUS CART LENGTH FOR PINTEREST
 
   // Constants for calculations
   const SHIPPING_COST = 10.0;
@@ -38,7 +39,8 @@ function CheckoutContent() {
             console.log('[Checkout] ✅ Cart loaded from Firestore:', items);
             setCart(items);
             localStorage.setItem('cart', JSON.stringify(items));
-            cartLoadedRef.current = true; // ✅ Mark as loaded
+            cartLoadedRef.current = true;
+            previousCartLength.current = items.length; // ✅ TRACK LOADED CART LENGTH
             return;
           }
         }
@@ -55,7 +57,8 @@ function CheckoutContent() {
           if (Array.isArray(parsedCart) && parsedCart.length > 0) {
             console.log('[Checkout] ✅ Cart loaded from localStorage:', parsedCart);
             setCart(parsedCart);
-            cartLoadedRef.current = true; // ✅ Mark as loaded
+            cartLoadedRef.current = true;
+            previousCartLength.current = parsedCart.length; // ✅ TRACK LOADED CART LENGTH
             
             // Save to Firestore for next time
             try {
@@ -80,11 +83,11 @@ function CheckoutContent() {
       // No cart found anywhere
       console.log('[Checkout] ❌ No cart found in Firestore or localStorage');
       setCart([]);
-      cartLoadedRef.current = true; // ✅ Mark as loaded (even if empty)
+      cartLoadedRef.current = true;
     } catch (err) {
       console.error('[Checkout] Error loading cart:', err);
       setCart([]);
-      cartLoadedRef.current = true; // ✅ Mark as loaded
+      cartLoadedRef.current = true;
     }
   };
 
@@ -113,6 +116,43 @@ function CheckoutContent() {
     
     setLoading(false);
   }, [router]);
+
+  // 📌 PINTEREST EMAIL TRACKING
+  useEffect(() => {
+    // Send user email to Pinterest for Enhanced Match
+    if (customer?.email && typeof window !== 'undefined' && window.pintrk) {
+      window.pintrk('load', '2612779406065', {
+        em: customer.email
+      });
+      console.log('[Pinterest] Checkout - Email tracked:', customer.email);
+    }
+  }, [customer]);
+
+  // 📌 PINTEREST ADD-TO-CART TRACKING (improved to avoid duplicates)
+  useEffect(() => {
+    if (cart.length > 0 && typeof window !== 'undefined' && window.pintrk) {
+      // Only track NEW items (not items already in cart)
+      const newItems = cart.slice(previousCartLength.current);
+      
+      newItems.forEach(item => {
+        window.pintrk('track', 'addtocart', {
+          value: parseFloat(item.price || 0),
+          currency: 'USD',
+          content_ids: [item.id],
+          content_name: item.name || item.productName,
+          content_category: item.category || 'products',
+          content_type: 'product',
+          num_items: item.quantity || 1
+        });
+      });
+      
+      if (newItems.length > 0) {
+        console.log('[Pinterest] New items tracked:', newItems.length);
+      }
+    }
+    
+    previousCartLength.current = cart.length;
+  }, [cart]);
 
   // ✅ ONLY SAVE CART IF IT HAS ACTUALLY CHANGED (not just loaded)
   useEffect(() => {
@@ -149,8 +189,6 @@ function CheckoutContent() {
       }
     };
 
-    // Only save if cart is not empty OR if it was previously not empty
-    // This prevents saving on initial load
     saveCartAsync();
   }, [cart, customer]);
 
@@ -256,6 +294,21 @@ function CheckoutContent() {
         setError(data.error || 'Checkout failed');
         setLoading(false);
         return;
+      }
+
+      // 📌 PINTEREST PURCHASE TRACKING - EXECUTE IMMEDIATELY ✅
+      if (typeof window !== 'undefined' && window.pintrk && amounts.total > 0) {
+        window.pintrk('track', 'checkout', {
+          value: amounts.total.toFixed(2),
+          currency: 'USD',
+          content_ids: cart.map(item => item.id),
+          content_name: `Order - ${cart.length} items`,
+          content_type: 'product',
+          num_items: cart.length,
+          order_quantity: cart.length,
+          order_id: Date.now().toString(),
+        });
+        console.log('[Pinterest] Purchase tracked - Amount:', amounts.total);
       }
 
       const stripe = await loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY);
