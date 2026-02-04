@@ -1,8 +1,8 @@
 // app/api/social/publish/route.js
-// FIXED - Read Pinterest credentials from Firestore
+// FIXED - Read from correct Firestore path: users/{userId}/integrations/{integrationId}
 
 import { NextResponse } from 'next/server';
-import { doc, updateDoc, arrayUnion, increment, collection, addDoc, getDoc } from 'firebase/firestore';
+import { doc, updateDoc, arrayUnion, increment, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export async function POST(request) {
@@ -30,36 +30,35 @@ export async function POST(request) {
       );
     }
 
-    // ✅ GET PINTEREST CREDENTIALS FROM FIRESTORE
+    // ✅ GET PINTEREST CREDENTIALS FROM CORRECT FIRESTORE PATH
     console.log('[Social API] Loading Pinterest credentials from Firestore...');
     let pinterestToken = null;
     let boardId = null;
 
     try {
-      // Get user's integrations
-      const integrationsRef = doc(db, 'user_integrations', userId);
-      const integrationsSnap = await getDoc(integrationsRef);
+      // ✅ CORRECT PATH: users/{userId}/integrations/pinterest
+      const pinterestRef = doc(db, 'users', userId, 'integrations', 'pinterest');
+      const pinterestSnap = await getDoc(pinterestRef);
 
-      if (integrationsSnap.exists()) {
-        const integrations = integrationsSnap.data();
-        console.log('[Social API] Integrations found:', Object.keys(integrations));
+      console.log('[Social API] Firestore path:', `users/${userId}/integrations/pinterest`);
+      console.log('[Social API] Document exists:', pinterestSnap.exists());
 
-        // Get Pinterest integration
-        if (integrations.pinterest) {
-          const pinterestData = integrations.pinterest;
-          console.log('[Social API] Pinterest data:', {
-            status: pinterestData.status,
-            hasToken: !!pinterestData.credentials?.accessToken,
-            hasBoardId: !!pinterestData.credentials?.boardId,
-          });
+      if (pinterestSnap.exists()) {
+        const pinterestData = pinterestSnap.data();
+        console.log('[Social API] Pinterest data:', {
+          status: pinterestData.status,
+          hasToken: !!pinterestData.credentials?.accessToken,
+          hasBoardId: !!pinterestData.credentials?.boardId,
+        });
 
-          pinterestToken = pinterestData.credentials?.accessToken;
-          boardId = pinterestData.credentials?.boardId;
-        } else {
-          console.warn('[Social API] Pinterest integration not found in Firestore');
-        }
+        pinterestToken = pinterestData.credentials?.accessToken;
+        boardId = pinterestData.credentials?.boardId;
+
+        console.log('[Social API] ✅ Got Pinterest credentials');
+        console.log('[Social API] Token:', pinterestToken ? '✅ Present' : '❌ Missing');
+        console.log('[Social API] Board ID:', boardId ? '✅ Present' : '❌ Missing');
       } else {
-        console.warn('[Social API] No integrations document found for user:', userId);
+        console.warn('[Social API] Pinterest integration document not found');
       }
     } catch (err) {
       console.error('[Social API] Error loading from Firestore:', err);
