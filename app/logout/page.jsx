@@ -1,4 +1,3 @@
-import { useEffect } from 'react';
 import './globals.css';
 
 export const metadata = {
@@ -22,7 +21,7 @@ export default function RootLayout({ children }) {
         </noscript>
       </head>
       <body>
-        {/* Pinterest Tag Script */}
+        {/* Pinterest Tag Script - Loads on ALL pages */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
