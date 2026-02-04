@@ -1,5 +1,5 @@
 // app/api/social/publish/route.js
-// REAL Pinterest API Integration - Actually Posts to Pinterest!
+// CORRECTED - Real Pinterest API Integration with proper response handling
 
 import { NextResponse } from 'next/server';
 import { doc, updateDoc, arrayUnion, increment, collection, addDoc } from 'firebase/firestore';
@@ -29,23 +29,13 @@ export async function POST(request) {
       );
     }
 
-    // ✅ Get integration credentials from Firestore
+    // ✅ Get integration credentials from environment
     console.log('[Social API] Loading integration credentials...');
-    let pinterestToken = null;
-    let boardId = null;
+    const pinterestToken = process.env.PINTEREST_ACCESS_TOKEN;
+    const boardId = process.env.PINTEREST_BOARD_ID;
 
-    try {
-      // You would fetch these from your admin settings or integrations table
-      // For now, get from environment variables
-      pinterestToken = process.env.PINTEREST_ACCESS_TOKEN;
-      boardId = process.env.PINTEREST_BOARD_ID;
-
-      if (!pinterestToken) {
-        console.warn('[Social API] Pinterest token not configured');
-      }
-    } catch (err) {
-      console.error('[Social API] Error loading credentials:', err);
-    }
+    console.log('[Social API] Pinterest Token exists:', !!pinterestToken);
+    console.log('[Social API] Board ID:', boardId);
 
     const results = [];
     let successCount = 0;
@@ -55,7 +45,7 @@ export async function POST(request) {
 
     for (const platform of platforms) {
       try {
-        let result = { platform: null, success: false, error: null };
+        let result = null;
 
         if (platform === 'pinterest') {
           console.log('[Social API] Publishing to REAL Pinterest API...');
@@ -97,10 +87,11 @@ export async function POST(request) {
           });
         }
 
-        results.push(result);
-        if (result.success) successCount++;
-        
-        console.log(`[Social API] ${result.platform}: ${result.success ? '✅ Success' : '❌ Failed'}`);
+        if (result) {
+          results.push(result);
+          if (result.success) successCount++;
+          console.log(`[Social API] ${result.platform}: ${result.success ? '✅ Success' : '❌ Failed'}`);
+        }
       } catch (error) {
         console.error(`[Social API] Error publishing to ${platform}:`, error);
         results.push({
@@ -114,7 +105,7 @@ export async function POST(request) {
     // ✅ Update product with social post records
     console.log('[Social API] Updating product database...');
     try {
-      const successfulPosts = results.filter(r => r.success);
+      const successfulPosts = results.filter(r => r && r.success);
 
       if (successfulPosts.length > 0) {
         await updateDoc(doc(db, 'products', productId), {
@@ -145,7 +136,7 @@ export async function POST(request) {
         platforms: platforms,
         successful: successCount,
         failed: platforms.length - successCount,
-        results: results.map(r => ({ platform: r.platform, success: r.success })),
+        results: results.map(r => ({ platform: r?.platform || 'Unknown', success: r?.success || false })),
       };
 
       await addDoc(collection(db, 'analytics', 'social_publishes'), analyticsData);
@@ -156,9 +147,10 @@ export async function POST(request) {
 
     console.log('[Social API] ===== SOCIAL PUBLISH COMPLETE =====');
 
+    // ✅ ENSURE RESULTS IS AN ARRAY AND RETURN PROPERLY
     return NextResponse.json({
       success: successCount > 0,
-      results,
+      results: results && Array.isArray(results) ? results : [],
       stats: {
         total: platforms.length,
         successful: successCount,
@@ -169,7 +161,7 @@ export async function POST(request) {
   } catch (error) {
     console.error('[Social API] ❌ Fatal error:', error);
     return NextResponse.json(
-      { success: false, error: error.message || 'Unknown error' },
+      { success: false, error: error.message || 'Unknown error', results: [] },
       { status: 500 }
     );
   }
@@ -199,16 +191,28 @@ async function publishToPinterestAPI({ productId, productName, productDescriptio
       };
     }
 
+    if (!imageUrl) {
+      console.error('[Pinterest API] No image URL');
+      return {
+        platform: 'Pinterest',
+        success: false,
+        error: 'Product has no image',
+      };
+    }
+
     // ✅ Call Pinterest API to create a pin
     console.log('[Pinterest API] Calling Pinterest Create Pin endpoint...');
     
     const pinData = {
-      title: productName,
-      description: `${productName} - $${productPrice}\n\n${productDescription}`,
-      dominant_color: '#000000',
-      link: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://www.dropshipwithmonk.sbs'}/p/${productId}`,
-      image_url: imageUrl,
       board_id: boardId,
+      media_source: {
+        source_type: 'image_url',
+        url: imageUrl,
+      },
+      description: `${productName}\n\n${productDescription}\n\n💰 Price: $${productPrice}`,
+      title: productName,
+      link: `${process.env.NEXT_PUBLIC_SITE_URL || 'https://www.dropshipwithmonk.sbs'}/p/${productId}`,
+      alt_text: productName,
     };
 
     console.log('[Pinterest API] Pin data:', pinData);
@@ -230,11 +234,20 @@ async function publishToPinterestAPI({ productId, productName, productDescriptio
       return {
         platform: 'Pinterest',
         success: false,
-        error: responseData.message || 'Failed to create pin',
+        error: responseData.message || `Failed to create pin: HTTP ${response.status}`,
       };
     }
 
     // ✅ SUCCESS! Pin created on Pinterest
+    if (!responseData || !responseData.id) {
+      console.error('[Pinterest API] Invalid response - no pin ID');
+      return {
+        platform: 'Pinterest',
+        success: false,
+        error: 'Invalid response from Pinterest API',
+      };
+    }
+
     const pinUrl = `https://www.pinterest.com/pin/${responseData.id}`;
     
     console.log('[Pinterest API] ✅ Pin created successfully!');
@@ -246,7 +259,6 @@ async function publishToPinterestAPI({ productId, productName, productDescriptio
       postId: responseData.id,
       url: pinUrl,
       message: '✅ Posted to Pinterest successfully!',
-      pinData: responseData,
     };
 
   } catch (error) {
