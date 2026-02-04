@@ -1,20 +1,25 @@
-import './globals.css';
-import PinterestPixel from './components/PinterestPixel';
+'use client';
 
-export const metadata = {
-  title: 'DropBoard Dashboard',
-  description: 'Dropshipping Dashboard',
-};
+import { useEffect } from 'react';
+import { useRouter } from 'next/navigation';
 
-export default function RootLayout({ children }) {
+export default function LogoutPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    // Clear localStorage
+    localStorage.removeItem('customer');
+    localStorage.removeItem('customerToken');
+    
+    // Redirect to home
+    router.push('/');
+  }, [router]);
+
   return (
-    <html lang="en">
-      <head>
-      </head>
-      <body>
-        <PinterestPixel />
-        {children}
-      </body>
-    </html>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center">
+      <div className="text-center">
+        <p className="text-gray-400">Logging out...</p>
+      </div>
+    </div>
   );
 }
