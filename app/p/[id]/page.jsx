@@ -196,6 +196,19 @@ export default function ProductPage() {
           setProduct(productData);
           await loadRelatedProducts(productData);
 
+          // 📌 PINTEREST PAGE VIEW TRACKING
+if (typeof window !== 'undefined' && window.pintrk && productData) {
+  window.pintrk('track', 'page_visit', {
+    content_name: productData.name,
+    content_category: productData.category || 'products',
+    content_ids: [productData.id],
+    value: parseFloat(productData.price || 0),
+    currency: 'USD',
+    content_type: 'product'
+  });
+  console.log('[Pinterest] Product page view tracked:', productData.name);
+}
+
           try {
             const currentViews = productData.views || 0;
             await updateDoc(productRef, {
@@ -263,7 +276,18 @@ export default function ProductPage() {
     const itemQuantity = prod ? 1 : quantity;
 
     if (!itemToAdd) return;
-
+if (typeof window !== 'undefined' && window.pintrk && itemToAdd) {
+  window.pintrk('track', 'addtocart', {
+    value: parseFloat(itemToAdd.price || 0),
+    currency: 'USD',
+    content_ids: [itemToAdd.id],
+    content_name: itemToAdd.name || itemToAdd.productName,
+    content_category: itemToAdd.category || 'products',
+    content_type: 'product',
+    num_items: itemQuantity || 1
+  });
+  console.log('[Pinterest] Add-to-cart tracked:', itemToAdd.name);
+}
     const cartItem = {
       id: String(itemToAdd.id),
       productId: String(itemToAdd.productId || itemToAdd.id),
