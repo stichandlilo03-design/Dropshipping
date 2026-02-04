@@ -161,17 +161,18 @@ export default function ProductsPage() {
       }
 
       const response = await fetch('/api/social/publish', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          productId: product.id,
-          productName: product.name,
-          productDescription: product.description || '',
-          productPrice: product.price,
-          imageUrl: product.image,
-          platforms: Array.from(selectedPlatforms),
-        }),
-      });
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    productId: product.id,
+    productName: product.name,
+    productDescription: product.description || '',
+    productPrice: product.price,
+    imageUrl: product.image,
+    platforms: Array.from(selectedPlatforms),
+    userId: user.uid,  // ✅ ADD THIS LINE
+  }),
+});
 
       console.log('[Products] Response status:', response.status);
       const result = await response.json();
@@ -1187,4 +1188,5 @@ export default function ProductsPage() {
     </div>
   );
 }
+
 
