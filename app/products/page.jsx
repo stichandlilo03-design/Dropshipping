@@ -38,6 +38,7 @@ export default function ProductsPage() {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
+        console.log('[Products] User authenticated:', currentUser.uid);
         await loadProducts(currentUser.uid);
       } else {
         router.push('/auth/login');
@@ -151,6 +152,7 @@ export default function ProductsPage() {
 
     setPublishLoading(true);
     console.log('[Products] Publishing to platforms:', Array.from(selectedPlatforms));
+    console.log('[Products] Current user:', user?.uid);
 
     try {
       // ✅ ENSURE PRODUCT HAS IMAGE
@@ -160,17 +162,32 @@ export default function ProductsPage() {
         return;
       }
 
+      // ✅ ENSURE USER IS LOGGED IN
+      if (!user || !user.uid) {
+        showNotification('❌ User not authenticated', 'error');
+        setPublishLoading(false);
+        return;
+      }
+
+      const requestBody = {
+        productId: product.id,
+        productName: product.name,
+        productDescription: product.description || '',
+        productPrice: product.price,
+        imageUrl: product.image,
+        platforms: Array.from(selectedPlatforms),
+        userId: user.uid,  // ✅ SEND USER ID
+      };
+
+      console.log('[Products] Request body:', {
+        ...requestBody,
+        imageUrl: requestBody.imageUrl ? '✅ Present' : '❌ Missing',
+      });
+
       const response = await fetch('/api/social/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          productId: product.id,
-          productName: product.name,
-          productDescription: product.description || '',
-          productPrice: product.price,
-          imageUrl: product.image,
-          platforms: Array.from(selectedPlatforms),
-        }),
+        body: JSON.stringify(requestBody),
       });
 
       console.log('[Products] Response status:', response.status);
@@ -190,8 +207,18 @@ export default function ProductsPage() {
         const successCount = result.results.filter(r => r && r.success).length;
         showNotification(`✅ Published to ${successCount} platform(s)!`, 'success');
       } else {
-        console.error('[Products] Publish error:', result.error);
-        showNotification(`❌ Error: ${result.error || 'Unknown error'}`, 'error');
+        // ✅ LOG ACTUAL ERROR FROM RESULTS
+        console.error('[Products] Full result:', result);
+        if (result.results && Array.isArray(result.results)) {
+          result.results.forEach((res, idx) => {
+            console.error(`[Products] Result ${idx}:`, res);
+          });
+        }
+        
+        const errorMsg = result.error || 
+                         (result.results?.[0]?.error) || 
+                         'Unknown error';
+        showNotification(`❌ Error: ${errorMsg}`, 'error');
       }
     } catch (error) {
       console.error('[Products] Error:', error);
@@ -729,7 +756,7 @@ export default function ProductsPage() {
           </div>
         )}
 
-        {/* Publish Modal - FIXED */}
+        {/* Publish Modal */}
         {showPublishModal && selectedProduct && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
             <div className="bg-slate-800 rounded-lg p-6 max-w-md w-full border border-slate-700 my-auto">
@@ -742,7 +769,6 @@ export default function ProductsPage() {
                 <>
                   <p className="text-gray-300 mb-4">Select platforms to publish "{selectedProduct.name}"</p>
 
-                  {/* ✅ CHECK IF PRODUCT HAS IMAGE */}
                   {!selectedProduct.image && (
                     <div className="mb-4 p-3 bg-red-900/30 border border-red-500 rounded text-red-300 text-sm flex items-center gap-2">
                       <AlertCircle size={16} />
