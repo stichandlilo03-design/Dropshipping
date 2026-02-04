@@ -43,6 +43,17 @@ function CustomerDashboardContent() {
     loadCustomerData();
   }, []);
 
+  // 📌 PINTEREST EMAIL TRACKING
+useEffect(() => {
+  // Send user email to Pinterest for Enhanced Match
+  if (customer?.email && typeof window !== 'undefined' && window.pintrk) {
+    window.pintrk('load', '2612779406065', {
+      em: customer.email // Send email for better targeting
+    });
+    console.log('[Pinterest] User email tracked:', customer.email);
+  }
+}, [customer]);
+  
   const loadCustomerData = async () => {
     try {
       setLoading(true);
