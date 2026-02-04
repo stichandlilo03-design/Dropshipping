@@ -1,41 +1,50 @@
-'use client';
-
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import './globals.css';
 
-export default function LogoutPage() {
-  const router = useRouter();
+export const metadata = {
+  title: 'DropBoard Dashboard',
+  description: 'Dropshipping Dashboard',
+};
 
-  useEffect(() => {
-    console.log('[Logout] Clearing session...');
-
-    // Clear all localStorage
-    localStorage.removeItem('customer');
-    localStorage.removeItem('customerToken');
-    localStorage.removeItem('cart');
-    localStorage.removeItem('pendingCheckout');
-    localStorage.removeItem('shoppingCart');
-    
-    // Clear sessionStorage
-    sessionStorage.clear();
-
-    console.log('[Logout] Session cleared');
-    console.log('[Logout] Redirecting to home...');
-
-    // Redirect to home after 1 second
-    setTimeout(() => {
-      router.push('/');
-    }, 1000);
-  }, [router]);
-
+export default function RootLayout({ children }) {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 flex items-center justify-center p-4">
-      <div className="text-center">
-        <div className="w-16 h-16 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-6"></div>
-        <h1 className="text-2xl font-bold text-white mb-2">Logging Out</h1>
-        <p className="text-gray-400">Clearing your session...</p>
-        <p className="text-gray-500 text-sm mt-4">Redirecting to home page...</p>
-      </div>
-    </div>
+    <html lang="en">
+      <head>
+        {/* Pinterest noscript fallback */}
+        <noscript>
+          <img 
+            height="1" 
+            width="1" 
+            style={{display: 'none'}} 
+            alt="" 
+            src="https://ct.pinterest.com/v3/?event=init&tid=2612779406065&noscript=1" 
+          />
+        </noscript>
+      </head>
+      <body>
+        {/* Pinterest Tag Script */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.pintrk = window.pintrk || function() {
+                (window.pintrk.queue = window.pintrk.queue || []).push(arguments);
+              };
+              window.pintrk.queue = window.pintrk.queue || [];
+              window.pintrk.version = "3.0";
+              
+              var n = document.createElement("script");
+              n.async = true;
+              n.src = "https://s.pinimg.com/ct/core.js";
+              var t = document.getElementsByTagName("script")[0];
+              t.parentNode.insertBefore(n, t);
+              
+              window.pintrk('load', '2612779406065');
+              window.pintrk('page');
+            `
+          }}
+        />
+        {children}
+      </body>
+    </html>
   );
 }
