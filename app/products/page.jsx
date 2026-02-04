@@ -190,9 +190,19 @@ export default function ProductsPage() {
         const successCount = result.results.filter(r => r && r.success).length;
         showNotification(`✅ Published to ${successCount} platform(s)!`, 'success');
       } else {
-        console.error('[Products] Publish error:', result.error);
-        showNotification(`❌ Error: ${result.error || 'Unknown error'}`, 'error');
-      }
+  // ✅ LOG ACTUAL ERROR FROM RESULTS
+  console.error('[Products] Full result:', result);
+  if (result.results && Array.isArray(result.results)) {
+    result.results.forEach((res, idx) => {
+      console.error(`[Products] Result ${idx}:`, res);
+    });
+  }
+  
+  const errorMsg = result.error || 
+                   (result.results?.[0]?.error) || 
+                   'Unknown error';
+  showNotification(`❌ Error: ${errorMsg}`, 'error');
+}
     } catch (error) {
       console.error('[Products] Error:', error);
       showNotification(`❌ Error publishing: ${error.message}`, 'error');
@@ -1177,3 +1187,4 @@ export default function ProductsPage() {
     </div>
   );
 }
+
