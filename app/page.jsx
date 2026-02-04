@@ -8,6 +8,7 @@ import { auth } from '@/lib/firebase';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+<meta name="p:domain_verify" content="e44b6216cd50ead1ed6933b6fa35e6c8"/>
 
 export default function LandingPage() {
   const router = useRouter();
@@ -376,3 +377,4 @@ export default function LandingPage() {
     </div>
   );
 }
+
