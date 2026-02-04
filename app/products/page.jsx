@@ -153,6 +153,13 @@ export default function ProductsPage() {
     console.log('[Products] Publishing to platforms:', Array.from(selectedPlatforms));
 
     try {
+      // ✅ ENSURE PRODUCT HAS IMAGE
+      if (!product.image) {
+        showNotification('❌ Product must have an image to publish', 'error');
+        setPublishLoading(false);
+        return;
+      }
+
       const response = await fetch('/api/social/publish', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -166,19 +173,29 @@ export default function ProductsPage() {
         }),
       });
 
+      console.log('[Products] Response status:', response.status);
       const result = await response.json();
+      console.log('[Products] Response:', result);
 
-      if (result.success) {
+      if (!result || typeof result !== 'object') {
+        console.error('[Products] Invalid response:', result);
+        showNotification('❌ Invalid response from server', 'error');
+        setPublishLoading(false);
+        return;
+      }
+
+      if (result.success && result.results && Array.isArray(result.results)) {
         console.log('[Products] Published:', result);
         setPublishResults(result.results);
-        showNotification(`✅ Published to ${result.stats.successful} platform(s)!`, 'success');
+        const successCount = result.results.filter(r => r && r.success).length;
+        showNotification(`✅ Published to ${successCount} platform(s)!`, 'success');
       } else {
-        console.error('[Products] Error:', result.error);
-        showNotification(`❌ Error: ${result.error}`, 'error');
+        console.error('[Products] Publish error:', result.error);
+        showNotification(`❌ Error: ${result.error || 'Unknown error'}`, 'error');
       }
     } catch (error) {
       console.error('[Products] Error:', error);
-      showNotification('Error publishing to social media', 'error');
+      showNotification(`❌ Error publishing: ${error.message}`, 'error');
     } finally {
       setPublishLoading(false);
     }
@@ -712,7 +729,7 @@ export default function ProductsPage() {
           </div>
         )}
 
-        {/* Publish Modal - NEW */}
+        {/* Publish Modal - FIXED */}
         {showPublishModal && selectedProduct && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
             <div className="bg-slate-800 rounded-lg p-6 max-w-md w-full border border-slate-700 my-auto">
@@ -725,13 +742,21 @@ export default function ProductsPage() {
                 <>
                   <p className="text-gray-300 mb-4">Select platforms to publish "{selectedProduct.name}"</p>
 
+                  {/* ✅ CHECK IF PRODUCT HAS IMAGE */}
+                  {!selectedProduct.image && (
+                    <div className="mb-4 p-3 bg-red-900/30 border border-red-500 rounded text-red-300 text-sm flex items-center gap-2">
+                      <AlertCircle size={16} />
+                      Product must have an image to publish
+                    </div>
+                  )}
+
                   {/* Platform Selection */}
                   <div className="space-y-3 mb-6">
                     {[
+                      { id: 'pinterest', name: 'Pinterest', icon: '📌' },
                       { id: 'tiktok', name: 'TikTok Shop', icon: '🎵' },
                       { id: 'instagram', name: 'Instagram', icon: '📷' },
                       { id: 'facebook', name: 'Facebook', icon: '👥' },
-                      { id: 'pinterest', name: 'Pinterest', icon: '📌' },
                     ].map(platform => (
                       <label key={platform.id} className="flex items-center gap-3 p-3 bg-slate-700 rounded-lg cursor-pointer hover:bg-slate-600 transition">
                         <input
@@ -746,6 +771,7 @@ export default function ProductsPage() {
                             }
                             setSelectedPlatforms(newSelected);
                           }}
+                          disabled={!selectedProduct.image}
                           className="w-5 h-5 rounded"
                         />
                         <span className="text-2xl">{platform.icon}</span>
@@ -764,7 +790,7 @@ export default function ProductsPage() {
                     </button>
                     <button
                       onClick={() => handlePublish(selectedProduct)}
-                      disabled={publishLoading || selectedPlatforms.size === 0}
+                      disabled={publishLoading || selectedPlatforms.size === 0 || !selectedProduct.image}
                       className="flex-1 bg-purple-600 hover:bg-purple-700 disabled:bg-gray-600 text-white py-2 rounded transition flex items-center justify-center gap-2 font-bold"
                     >
                       {publishLoading ? (
@@ -784,18 +810,18 @@ export default function ProductsPage() {
               ) : (
                 <>
                   <div className="space-y-3 mb-6">
-                    {publishResults.map((result, idx) => (
+                    {publishResults && Array.isArray(publishResults) && publishResults.map((result, idx) => (
                       <div key={idx} className={`p-3 rounded-lg border ${
-                        result.success 
+                        result && result.success 
                           ? 'bg-green-900/30 border-green-500 text-green-300'
                           : 'bg-red-900/30 border-red-500 text-red-300'
                       }`}>
                         <p className="font-semibold flex items-center gap-2">
-                          {result.success ? <Check size={16} /> : <AlertCircle size={16} />}
-                          {result.platform}
+                          {result && result.success ? <Check size={16} /> : <AlertCircle size={16} />}
+                          {result?.platform || 'Unknown'}
                         </p>
                         <p className="text-xs mt-1">
-                          {result.success ? '✅ Published successfully!' : `❌ ${result.error}`}
+                          {result && result.success ? '✅ Published successfully!' : `❌ ${result?.error || 'Unknown error'}`}
                         </p>
                       </div>
                     ))}
