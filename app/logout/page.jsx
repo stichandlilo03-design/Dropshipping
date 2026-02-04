@@ -9,7 +9,6 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
-        {/* Pinterest noscript fallback */}
         <noscript>
           <img 
             height="1" 
@@ -21,7 +20,6 @@ export default function RootLayout({ children }) {
         </noscript>
       </head>
       <body>
-        {/* Pinterest Tag Script - Loads on ALL pages */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
